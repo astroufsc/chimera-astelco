@@ -24,13 +24,15 @@ import os
 import numpy as np
 import telnetlib
 from collections import defaultdict
-
+import re
+import shutil
 from chimera.core.chimeraobject import ChimeraObject
 from chimera.core.lock import lock
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
 from chimera.core.exceptions import ChimeraException
 from chimera.util.enum import Enum
 
+import logging
 
 __all__ = ["TPLBase"]
 
@@ -81,7 +83,7 @@ class TPL(ChimeraObject):
                   "tpl_port": 65432,
                   "user": 'admin',
                   "password": 'admin',
-                  "freq": 90,
+                  "freq": 2.,
                   "timeout": 60,
                   "waittime": 0.5,
                   "history" : 1000}
@@ -91,12 +93,19 @@ class TPL(ChimeraObject):
         ChimeraObject.__init__(self)
 
         # debug log
-        self._debugLog = None
-        try:
-            self._debugLog = open(
-                os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl-debug.log"), "w")
-        except IOError, e:
-            self.log.warning("Could not create tpl debug file (%s)" % str(e))
+        # self._debugLog = None
+        self._debuglog = logging.getLogger('_tpldebug_')
+        logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl.log")
+        if os.path.exists(logfile):
+            shutil.move(logfile, os.path.join(SYSTEM_CONFIG_DIRECTORY,
+                                              "tpl.log_%s"%time.strftime("%Y%m%d-%H%M%S")))
+
+        _log_handler = logging.FileHandler(logfile)
+        _log_handler.setFormatter(logging.Formatter(fmt='%(asctime)s[%(levelname)s:%(threadName)s]-%(name)s-(%(filename)s:%(lineno)d):: %(message)s'))
+        # _log_handler.setLevel(logging.DEBUG)
+        self._debuglog.setLevel(logging.DEBUG)
+        self._debuglog.addHandler(_log_handler)
+        self.log.setLevel(logging.INFO)
 
         # Command counter
         self.next_command_id = 1
@@ -105,84 +114,119 @@ class TPL(ChimeraObject):
         # Store received objects
         self.commands_sent = {}
 
+        self._expect = [ '(?P<CMDID>\d+) DATA INLINE (?P<OBJECT>\S+)=(?P<VALUE>.+)',
+                         '(?P<CMDID>\d+) DATA OK (?P<OBJECT>\S+)',
+                         '(?P<CMDID>\d+) COMMAND (?P<STATUS>\S+)',
+                         '(?P<CMDID>\d+) EVENT ERROR (?P<OBJECT>\S+):(?P<ENCM>(.*?)\s*)']
+
 
     def __start__(self):
 
-        self.setHz(1.0)
+        self.setHz(self['freq'])
 
-        self.log.debug('tpl START')
+        self._debuglog.debug('tpl START')
         self.open()
 
         return True
 
     def __stop__(self):
-        self.log.debug('tpl STOP')
+        self._debuglog.debug('tpl STOP')
         self.close()
 
     @lock
     def control(self):
 
-        # self.log.debug('[control] entering...')
+        # self._debuglog.debug('[control] entering...')
 
         # check if there is any incomplete command
         incomplete = np.any(np.array([not cmd.complete for cmd in self.commands_sent.values()]))
         if incomplete:
-            self.log.debug('[control] TPL has incomplete commands')
+            self._debuglog.debug('[control] TPL has incomplete commands')
+            for cmd in self.commands_sent.values():
+                if not cmd.complete:
+                    self._debuglog.debug('[control] Command %i not complete'%cmd.id)
         else:
             return True
 
-        recv = self.expect()
+        exp_recv = self.expect()
+        self._debuglog.debug('[control] Received %i commands'%len(exp_recv))
 
-        nrec = 0
+        for i in range(len(exp_recv)):
+            recv = exp_recv[i]
 
-        while recv[1]:
-            nrec+=1
-            self.log.debug(recv[2][:-1])
+            self._debuglog.debug(recv[2])
             cmdid = int(recv[1].group('CMDID'))
             if not cmdid in self.commands_sent.keys():
                 self.log.warning('Received a bad command id %i. Skipping'%cmdid)
-                return True
+                continue
 
-            self.commands_sent[cmdid].received.append(recv[2][:-1])
+            self.commands_sent[cmdid].received.append(recv[2])
 
-            if 'DATA INLINE' in recv[2]:
-                if '!TYPE' in recv[2]:
-                    self.commands_sent[cmdid].dtype = _CmdType[recv[1].group('VALUE')]
-                else:
-                    self.commands_sent[cmdid].data.append(self.commands_sent[cmdid].dtype(recv[1].group('VALUE').replace('"','')))
-            elif 'COMMAND' in recv[2]:
-                self.commands_sent[cmdid].status = recv[1].group('STATUS')
-                self.commands_sent[cmdid].allstatus.append(recv[1].group('STATUS'))
-                if self.commands_sent[cmdid].status == 'OK':
-                    self.commands_sent[cmdid].ok = True
-                elif self.commands_sent[cmdid].status == 'COMPLETE':
-                    self.commands_sent[cmdid].complete = True
+            try:
+                if 'DATA INLINE' in recv[2]:
+                    if '!TYPE' in recv[2]:
+                        self.commands_sent[cmdid].dtype = _CmdType[recv[1].group('VALUE')]
+                    else:
+                        self.commands_sent[cmdid].data.append(self.commands_sent[cmdid].dtype(recv[1].group('VALUE').replace('"','')))
+                elif 'COMMAND' in recv[2]:
+                    self.commands_sent[cmdid].status = recv[1].group('STATUS')
+                    self.commands_sent[cmdid].allstatus.append(recv[1].group('STATUS'))
+                    if self.commands_sent[cmdid].status == 'OK':
+                        self.commands_sent[cmdid].ok = True
+                    elif self.commands_sent[cmdid].status == 'COMPLETE':
+                        self.commands_sent[cmdid].complete = True
 
-            elif 'EVENT ERROR' in recv[2]:
-                self.commands_sent[cmdid].events.append(recv[1].group('ENCM'))
+                elif 'EVENT ERROR' in recv[2]:
+                    self.commands_sent[cmdid].events.append(recv[1].group('ENCM'))
 
-            recv = self.expect()
+            except Exception,e:
+                self.log.error('[control] Error on command: %s'%(recv[2][:-1]))
+                self.commands_sent[cmdid].ok = False
+                self.commands_sent[cmdid].complete = True
+                self.log.exception(e)
+                pass
+
+            # incomplete = np.any(np.array([not cmd.complete for cmd in self.commands_sent.values()]))
 
         # Check size of commands and clear history
         while len(self.commands_sent) > int(self["history"]):
             self.last_cmd_deleted += 1
-            self.log.debug('[control] Cleaning command history. Deleting cmd with id: %i'%self.last_cmd_deleted)
+            self._debuglog.debug('[control] Cleaning command history. Deleting cmd with id: %i'%self.last_cmd_deleted)
             self.commands_sent.pop(self.last_cmd_deleted)
 
-        # self.log.debug('[control] Received %i commands'%nrec)
+        # self._debuglog.debug('[control] Received %i commands'%nrec)
         # for cmd in self.commands_sent.values():
         #     msg = '%s %s %s'%(cmd.id,cmd.status,cmd.allstatus)
-        #     self.log.debug(msg)
-        self.log.debug('[control] Done')
+        #     self._debuglog.debug(msg)
+        self._debuglog.debug('[control] Done')
 
         return True
 
     def expect(self):
 
-        return self.sock.expect(['(?P<CMDID>\d+) DATA INLINE (?P<OBJECT>\S+)=(?P<VALUE>\S+)\n',
-                                 '(?P<CMDID>\d+) COMMAND (?P<STATUS>\S+)\n',
-                                 '(?P<CMDID>\d+) EVENT ERROR (?P<OBJECT>\S+):(?P<ENCM>(.*?)\s*)\n'],
-                                timeout=self['freq']*2.)
+        buff = ''
+        recv = None
+        while recv != '':
+            recv = self.sock.read_very_eager()
+            buff+=recv
+
+        buff = buff.split('\n')
+        ret = []
+
+        for line in buff:
+
+            if len(line) < 1:
+                continue
+            for exp in self._expect:
+                re_exp = re.search(exp,line)
+                if re_exp:
+                    ret.append((0,re_exp,line))
+                    break
+
+        return ret
+        #return buff
+        #return self.sock.expect(self._expect,
+        #                        timeout=self['timeout'])
 
     @lock
     def open(self):  # converted to Astelco
@@ -245,6 +289,13 @@ class TPL(ChimeraObject):
         self.next_command_id+=1
         return ocmid
 
+    def getCmd(self,cmdid):
+        if cmdid in self.commands_sent.keys():
+            return self.commands_sent[cmdid]
+        else:
+            self.log.warning('cmdid %s does not exists.'%cmdid)
+            return None
+
     def sendcomm(self, comm, object):
 
         cmd = Command()
@@ -269,13 +320,20 @@ class TPL(ChimeraObject):
     def send(self, message='\r\n'):
 
         msg = '%s'%(message)
-        self.log.debug( msg[:-1] )
+        self._debuglog.debug( msg[:-1] )
 
         try:
             self.sock.write('%s'%message)
         except Exception, e:
             self.log.exception(e)
-            return SEND.ERROR
+            self.log.warning('Reseting connection...')
+            self.close()
+            self.open()
+            try:
+                self.sock.write('%s'%message)
+            except Exception, e:
+                self.log.exception(e)
+                return SEND.ERROR
 
         return SEND.OK
 
@@ -296,6 +354,8 @@ class TPL(ChimeraObject):
 
     def set(self, object, value, wait=False, binary=False):
 
+        cmid = None
+
         if not binary:
             obj = object + '=' + str(value)
             cmid = self.sendcomm('SET', obj)
@@ -307,7 +367,7 @@ class TPL(ChimeraObject):
             start = time.time()
             while not self.commands_sent[cmid].status == "COMPLETE":
                 if  time.time() > start+self['timeout']:
-                    self.log.warning('Command %i timed out...'%(ret))
+                    self.log.warning('Command %i timed out...'%(cmid))
                     break
                 continue
 
@@ -324,7 +384,7 @@ class TPL(ChimeraObject):
         # return None
         #
         # while not st == 'COMPLETE':
-        #     log.debug( '[%3i/%i] TPL2 getobject: got status "%s"'%(ntries,self.max_tries,st) )
+        #     log.log(5, '[%3i/%i] TPL2 getobject: got status "%s"'%(ntries,self.max_tries,st) )
         #     ntries+=1
         #     time.sleep(self.sleep)
         #     st = self.commands_sent[ocmid]['status']
@@ -353,7 +413,7 @@ class TPL(ChimeraObject):
         st = self.commands_sent[ocmid].status
 
         while not st == 'COMPLETE':
-            log.debug( '[%3i/%i] TPL2 getobject: got status "%s"'%(ntries,self.max_tries,st) )
+            log.log(5, '[%3i/%i] TPL2 getobject: got status "%s"'%(ntries,self.max_tries,st) )
             ntries+=1
             time.sleep(self.sleep)
             st = self.commands_sent[ocmid]['status']
@@ -364,7 +424,7 @@ class TPL(ChimeraObject):
             log.warning( 'TPL2 getobject: got status  %s ...' %st )
             return None
         if self.debug:
-            log.debug(self.received_objects)
+            log.log(5,self.received_objects)
         if self.received_objects[object + '!TYPE'] == '0':
             self.received_objects[object] = None
         elif self.received_objects[object + '!TYPE'] == '1':

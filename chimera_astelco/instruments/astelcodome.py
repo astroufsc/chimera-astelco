@@ -22,6 +22,7 @@
 import os
 import time
 import threading
+import copy
 
 from chimera.util.coord import Coord
 
@@ -30,16 +31,10 @@ from chimera.instruments.dome import DomeBase
 from chimera.interfaces.dome import Mode
 
 from chimera.core.lock import lock
-from chimera.core.exceptions import ChimeraException
+from chimera.core.exceptions import ObjectNotFoundException
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
 
-class AstelcoException(ChimeraException):
-    pass
-
-
-class AstelcoDomeException(ChimeraException):
-    pass
-
+from astelcoexceptions import AstelcoException, AstelcoDomeException
 
 class AstelcoDome(DomeBase):
     '''
@@ -110,10 +105,10 @@ class AstelcoDome(DomeBase):
     def slewToAz(self, az):
         # Astelco Dome will only enable slew if it is not tracking
         # If told to slew I will check if the dome is syncronized with
-        # with the telescope. If it is not I will wait until it gets
+        # with the telescope. If it is not it¡ will wait until it gets
         # in sync or timeout...
 
-        if self._mode == Mode.Track:
+        if self.getMode() == Mode.Track:
             self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...')
             self.slewBegin(az)
 
@@ -228,6 +223,14 @@ class AstelcoDome(DomeBase):
 
         return Coord.fromD(self._position)
 
+    @lock
+    def getAzOffset(self):
+
+        tpl = self.getTPL()
+        ret = tpl.getobject('POSITION.INSTRUMENTAL.DOME[0].OFFSET')
+
+        return Coord.fromD(ret)
+
     def getMode(self):
 
         tpl = self.getTPL()
@@ -256,72 +259,109 @@ class AstelcoDome(DomeBase):
 
         # check slit condition
 
-        if self._slitMoving:
+        if self.slitMoving():
             raise AstelcoException('Slit already opening...')
-        elif self._slitOpen:
+        elif self.isSlitOpen():
             self.log.info('Slit already opened...')
             return 0
 
-        self._slitMoving = True
         self._abort.clear()
         tpl = self.getTPL()
 
-        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 1, wait=True)
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 1, wait=False)
 
         time_start = time.time()
 
+        cmd = tpl.getCmd(cmdid)
         cmdComplete = False
-        while True:
+        while not cmd.complete:
 
-            realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
-
-            if tpl.commands_sent[cmdid].complete and ( (not realpos == 1) and (not cmdComplete) ):
-                    self.log.warning('Slit opened! Opening Flap...')
-                    cmdid = self._tpl.set('AUXILIARY.DOME.TARGETPOS', 1, wait=True)
-                    cmdComplete = True
-                    time_start = time.time()
-
-            if realpos == 1:
-                self._slitMoving = False
-                self._slitOpen = True
-                return DomeStatus.OK
-            elif self._abort.isSet():
-                self._slitMoving = False
+            if self._abort.isSet():
                 return DomeStatus.ABORTED
             elif time.time() > time_start + self._maxSlewTime:
                 return DomeStatus.TIMEOUT
 
-        return True
+            cmd = tpl.getCmd(cmdid)
+
+
+        realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+
+        if realpos == 1:
+            return DomeStatus.OK
+
+        self.log.warning('Slit opened! Opening Flap...')
+
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 1, wait=False)
+        cmd = tpl.getCmd(cmdid)
+
+        time_start = time.time()
+
+        while not cmd.complete:
+
+            if self._abort.isSet():
+                return DomeStatus.ABORTED
+            elif time.time() > time_start + self._maxSlewTime:
+                return DomeStatus.TIMEOUT
+
+            cmd = tpl.getCmd(cmdid)
+
+        realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+
+        if realpos == 1:
+            return DomeStatus.OK
+        else:
+            return DomeStatus.ABORTED
+
+        # return DomeStatus.OK
 
     @lock
     def closeSlit(self):
-        if not self._slitOpen:
+        if not self.isSlitOpen():
             self.log.info('Slit already closed')
             return 0
 
         self.log.info("Closing slit")
 
         tpl = self.getTPL()
-        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 0)
+
+        realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 0,wait=False)
 
         time_start = time.time()
 
-        while True:
+        cmd = tpl.getCmd(cmdid)
 
-            for line in tpl.commands_sent[cmdid].received:
-                self.log.debug(line)
+        while not cmd.complete:
 
-            realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+            # for line in tpl.commands_sent[cmdid].received:
+            #     self.log.debug(line)
+
             if realpos == 0:
-                self._slitMoving = False
-                self._slitOpen = False
                 return DomeStatus.OK
             elif self._abort.isSet():
-                self._slitMoving = False
                 return DomeStatus.ABORTED
             elif time.time() > time_start + self._maxSlewTime:
                 return DomeStatus.TIMEOUT
 
+            cmd = tpl.getCmd(cmdid)
+
+        realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+
+        while realpos != 0:
+
+            if self._abort.isSet():
+                return DomeStatus.ABORTED
+            elif time.time() > time_start + self._maxSlewTime:
+                return DomeStatus.TIMEOUT
+
+            realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+
+        return DomeStatus.OK
+
+    def slitMoving(self):
+        # Todo: Find command to check if slit is movng
+        return False
 
     def isSlitOpen(self):
         tpl = self.getTPL()
@@ -339,3 +379,13 @@ class AstelcoDome(DomeBase):
                 return p
         except ObjectNotFoundException:
             return False
+
+    def getMetadata(self, request):
+        baseHDR = super(DomeBase, self).getMetadata(request)
+        newHDR = [("DOME_AZ",self.getAz().toDMS().__str__(),"Dome Azimuth"),
+                  ("D_OFFSET",self.getAzOffset().toDMS().__str__(),"Dome Azimuth offset")]
+
+        for new in newHDR:
+            baseHDR.append(new)
+
+        return baseHDR

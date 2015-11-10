@@ -19,354 +19,342 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import os
-import serial
 import time
+import collections
 import threading
 
 from chimera.interfaces.focuser import (InvalidFocusPositionException,
-										FocuserFeature)
+                                        FocuserFeature, FocuserAxis, ControllableAxis)
 
 from chimera.instruments.focuser import FocuserBase
 
 from chimera.core.lock import lock
-from chimera.core.exceptions import ChimeraException
+from chimera.core.exceptions import ObjectNotFoundException
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
 
 from chimera.util.enum import Enum
 
-from chimera.util.tpl2 import TPL2,SocketError
-
-class AstelcoException(ChimeraException):
-	pass
-
-class AstelcoHexapodException(ChimeraException):
-	pass
+from astelcoexceptions import AstelcoException, AstelcoHexapodException
 
 Direction = Enum("IN", "OUT")
-Axis = Enum("X","Y","Z","U","V") # For hexapod
+Axis = FocuserAxis #Enum("X", "Y", "Z", "U", "V")  # For hexapod
+AxisStep = {Axis.X : 'step_x',
+            Axis.Y : 'step_y',
+            Axis.Z : 'step_z',
+            Axis.U : 'step_u',
+            Axis.V : 'step_v',
+            Axis.W : 'step_w',
+            }
+AxisUnit = {Axis.X : 'unit_x',
+            Axis.Y : 'unit_y',
+            Axis.Z : 'unit_z',
+            Axis.U : 'unit_u',
+            Axis.V : 'unit_v',
+            Axis.W : 'unit_w',
+            }
+FocusPosition = collections.namedtuple('Focus','X Y Z U V')
 
-class AstelcoFocuser (FocuserBase):
-	'''
+class AstelcoFocuser(FocuserBase):
+    '''
 AstelcoFocuser interfaces chimera with TSI system to control focus. System 
-can be equiped with hexapod hardware. In this case, comunition is done in a 
+can be equiped with hexapod hardware. In this case, comunication is done in a
 vector. Temperature compensation can also be performed.
-	'''
+    '''
 
-	__config__ = {	'user'	: 'admin',
-					'password' : 'admin',
-					'ahost' : 'localhost',
-					'aport' : '65432',
-					'hexapod' : True,
-					'naxis'	: 5 ,
-					'step' : 0.001,
-					'unit' : 'mm'}
+    __config__ = {'tpl': '/TPL/0',
+                  'updatetime': 1., # in seconds
+                  'model': 'AstelcoFocuser',
 
-	def __init__ (self):
-		FocuserBase.__init__ (self)
+                  'hexapod': True,
 
-		self._supports = {	FocuserFeature.TEMPERATURE_COMPENSATION: False,
-							FocuserFeature.POSITION_FEEDBACK: True,
-							FocuserFeature.ENCODER: True}
+                  'step_x': 0.001,
+                  'step_y': 0.001,
+                  'step_z': 0.001,
+                  'step_u': 0.001,
+                  'step_v': 0.001,
+                  'step_w': 0.001,
 
-		self._position = [0]*self['naxis']
-		self._range = [None]*self['naxis']
-		self._step = [None]*self['naxis']
-		self._lastTimeLog = None
+                  'unit_x': 'mm',
+                  'unit_y': 'mm',
+                  'unit_z': 'mm',
+                  'unit_u': 'deg',
+                  'unit_v': 'deg',
+                  'unit_w': 'deg',
 
-		self._tsi = None
-		self._abort = threading.Event ()
+                  }
 
-		self._errorNo = 0
-		self._errorString = ""
+    def __init__(self):
+        FocuserBase.__init__(self)
 
-		self._poketime = 90.0
-		# debug log
-		self._debugLog = None
-		try:
-			self._debugLog = open(os.path.join(SYSTEM_CONFIG_DIRECTORY,
-											   "astelcofocuser-debug.log"), "w")
-		except IOError, e:
-			self.log.warning("Could not create astelco debug file (%s)" % str(e))
+        self._supports = {FocuserFeature.TEMPERATURE_COMPENSATION: False,
+                          FocuserFeature.POSITION_FEEDBACK: True,
+                          FocuserFeature.ENCODER: True,
+                          FocuserFeature.CONTROLLABLE_X: False,
+                          FocuserFeature.CONTROLLABLE_Y: False,
+                          FocuserFeature.CONTROLLABLE_U: False,
+                          FocuserFeature.CONTROLLABLE_V: False,
+                          FocuserFeature.CONTROLLABLE_W: False,
+                          }
 
+        self._position = {Axis.Z: None}
+        self._offset = {Axis.Z: None}
+        self._range = {Axis.Z: [None, None]}
+        self._step = {Axis.Z: None}
+        self._lastTimeLog = None
+        self._temperature = 0.
 
-		#self._user="admin"
-		#self._password="admin"
-		#self._aahost="localhost"
-		#self._aaport="65432"
-		#print '<--> INIT <-->'
+        self._abort = threading.Event()
 
-	def __start__(self):
+        self._errorNo = 0
+        self._errorString = ""
 
-		print '-->FOCUS START<--'
-		self.open()
-		
-		# range and step setting
-		if self['hexapod']:
-			for ax in Axis:
-				min = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET!MIN'%ax.index)
-				max = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET!MAX'%ax.index)
-				step= self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].STEP'%ax.index)
-				self._range[ax.index] = (min, max)
-				self._step[ax.index] = self["step"]
-				#if self._step[ax.index] == 'UNKNOWN':
-				#	self._step[ax.index] = self["step"]
-		else:
-			min = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.CURRPOS!MIN')
-			max = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.CURRPOS!MAX')
-			self._range[Axis.Z.index] = (min,max)
-			self._step[Axis.Z.index] = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.STEP')
+        # debug log
+        self._debugLog = None
+        try:
+            self._debugLog = open(os.path.join(SYSTEM_CONFIG_DIRECTORY,
+                                               "astelcofocuser-debug.log"), "w")
+        except IOError, e:
+            self.log.warning("Could not create astelco debug file (%s)" % str(e))
 
-		return True
-	
-	def __stop__(self):
-		self.close()
+    def __start__(self):
 
-	def __main__(self):
-		pass
+        self.open()
 
-	def naxis(self):
-		return len(self._position)
+        tpl = self.getTPL()
+        # range and step setting
+        if self['hexapod']:
 
-	def helloTPL(self):
-		self.log.debug(self._tpl.getobject('SERVER.UPTIME'))
-		self.sayhello = threading.Timer(self._poketime,self.helloTPL)
-		self.sayhello.start()
+            for i in ControllableAxis:
+                self._supports[i] = True
+                self._position[ControllableAxis[i]] = None
+                self._offset[ControllableAxis[i]] = None
+                self._rangeControllableAxis[i] = [None, None]
+                self._step[ControllableAxis[i]] = float(self[AxisStep[ControllableAxis[i]]])
 
-	@lock
-	def open(self):  # converted to Astelco
-		self.log.info('Connecting to Astelco server %s:%i'%(self["ahost"],
-															int(self["aport"])))
+            for ax in Axis:
+                min_ = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].REALPOS!MIN' % ax.index)
+                max_ = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].REALPOS!MAX' % ax.index)
+                self._position[ax] = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].REALPOS' % ax.index)
+                self._offset[ax] = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET' % ax.index)
 
-		self._tpl = TPL2(user=self['user'],
-						password=self['password'],
-						host=self['ahost'],
-						port=int(self['aport']),
-						echo=False,
-						verbose=False,
-						debug=True)
-		self.log.debug(self._tpl.log)
+                try:
+                    min_ = float(min_)
+                except Exception, e:
+                    self.log.debug('Could not determine minimum of axis %s:\n %s'%(ax,e))
+                    min_ = -999
+                try:
+                    max_ = float(max_)
+                except Exception, e:
+                    self.log.debug('Could not determine maximum of axis %s:\n %s'%(ax,e))
+                    max_ = 999
 
-		try:
-			self._tpl
-			self._tpl.get('SERVER.INFO.DEVICE')
-			self._tpl.received_objects
-			print self._tpl.getobject('SERVER.UPTIME')
-			self._tpl
-				
-			self._tpl.debug = False
-			self.sayhello = threading.Timer(self._poketime,self.helloTPL)
-			self.sayhello.start()
+                self._range[ax] = (min_, max_)
+        else:
 
-			return True
+            min_ = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.REALPOS!MIN')
+            max_ = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.REALPOS!MAX')
 
-		except (SocketError, IOError):
-			raise AstelcoException("Error while opening %s." % self["device"])
+            self._range[Axis.Z] = (min_, max_)
+            self._step[Axis.Z] = float(self[AxisStep[Axis.Z]])
+            self._position[Axis.Z] = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.REALPOS')
 
-	@lock
-	def close(self):  # converted to Astelco
-		self.sayhello.cancel()
-		self.log.debug("TPl2 log:\n")
-		for lstr in self._tpl.log:
-			self.log.debug(lstr)
-		if self._tpl.isListening():
-			self._tpl.disconnect()
-			return True
-		else:
-			return False
+        self.setHz(1. / self["updatetime"])
 
-	@lock
-	def moveIn(self, n, axis='Z'):
-		ax = self.getAxis(axis)
-		target = self.getOffset()[ax.index] - n*self._step[ax.index]
+        return True
 
-		self.log.debug('Setting offset on %s-axis to %f %s ...'%(ax,target,self['unit']))
-		
-		if self._inRange(target,ax):
-			self._setPosition(target,ax)
-		else:
-			raise InvalidFocusPositionException("%d is outside focuser "
-												"boundaries." % target)
+    @lock
+    def control(self):
+        '''
+        Constantly update focuser positions.
 
-	@lock
-	def moveOut(self, n, axis='Z'):
-		ax = self.getAxis(axis)
-		
-		target = self.getOffset()[ax.index] + n*self._step[ax.index]
-		
-		self.log.debug('Setting offset on %s-axis to %f %s ...'%(ax,target,self['unit']))
+        :return: True
+        '''
 
-		if self._inRange(target,ax):
-			self._setPosition(target,ax)
-		else:
-			raise InvalidFocusPositionException("%d is outside focuser "
-												"boundaries." % target)
+        self.updatePosition()
+        self.updateTemperature()
 
-	@lock
-	def moveTo(self, position,axis='Z'):
-		ax = self.getAxis(axis)
-		
-		self.log.debug('Setting offset on %s-axis to %f %s ...'%(ax,position*self._step[ax.index],self['unit']))
-		
-		#return 0
-		
-		if self._inRange(position*self._step[ax.index],ax):
-			self._setPosition(position*self._step[ax.index],ax)
-		else:
-			raise InvalidFocusPositionException("%f %s is outside focuser "
-												"boundaries." % (position*self._step[ax.index],
-												self["unit"]))
+        return True
 
-	@lock
-	def getOffset(self):
+    @lock
+    def moveIn(self, n, axis=FocuserAxis.Z):
 
-		if self['hexapod']:
-			pos = [0]*self['naxis']
-			for iax in range(self['naxis']):
-				pos[iax] = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET'%iax)
-			return pos
-		else:
-			return self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.OFFSET')
+        target = self.getOffset(axis) - n * self._step[axis]
 
+        self.log.debug('Setting offset on %s-axis to %f %s ...' % (axis, target, self[AxisUnit[axis]]))
 
-	@lock
-	def getPosition(self):
+        if self._inRange(target, axis):
+            self._setPosition(target, axis)
+        else:
+            raise InvalidFocusPositionException("%d is outside focuser "
+                                                "boundaries." % target)
 
-		return self.getOffset()
-		
-		if self['hexapod']:
-			pos = [0]*self['naxis']
-			for iax in range(self['naxis']):
-				pos[iax] = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].REALPOS'%iax)
-			return pos
-		else:
-			return self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.REALPOS')
+    @lock
+    def moveOut(self, n, axis=FocuserAxis.Z):
 
+        target = self.getOffset(axis) + n * self._step[axis]
 
-	def getRange(self,axis='Z'):
-		return self._range[self.getAxis(axis).index]
+        self.log.debug('Setting offset on %s-axis to %f %s ...' % (axis, target, self[AxisUnit[axis]]))
 
-	def _setPosition(self, n, axis=Axis.Z):
-		self.log.info("Changing focuser offset to %s" % n)
-		
-		cmdid = None
-		
-		if self['hexapod']:
-			cmdid = self._tpl.set('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET'%axis.index,n)
-		else:
-			cmdid = self._tpl.set('POSITION.INSTRUMENTAL.FOCUS.OFFSET',n)
-		
-		if not cmdid:
-			msg = "Could not change focus offset to %f %s"%(position*self._step[ax.index],
-															self["unit"])
-			self.log.error(msg)
-			raise InvalidFocusPositionException(msg)
-		
-		cmdComplete = False
-		while not cmdComplete:
-		
-			for line in self._tpl.commands_sent[cmdid]['received']:
-				self.log.debug(line[:-1])
-				if line.find('COMPLETE') > 0:
-					cmdComplete = True
-			time.sleep(1.0)
+        if self._inRange(target, axis):
+            self._setPosition(target, axis)
+        else:
+            raise InvalidFocusPositionException("%d is outside focuser "
+                                                "boundaries." % target)
 
-		# check limit state
-		LSTATE = self._tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].LIMIT_STATE'%axis.index)
-		code = '%16s'%(bin(LSTATE)[2:][::-1])
-		bitcode = [0,1,7,8,9,15]
-		LMESSG = ['MINIMUM HARDWARE LIMIT',
-				  'MAXIMUM HARDWARE LIMIT',
-				  'HARDWARE BLOCK',
-				  'MINIMUM SOFTWARE LIMIT',
-				  'MAXIMUM SOFTWARE LIMIT',
-				  'SOFTWARE BLOCK']
-		STATE = True
-		msg = ''
-		for ib,bit in enumerate(bitcode):
-			if code[bit] == '1':
-				STATE = False
-				msg += LMESSG[ib] + '|'
-		
-		
-		if not STATE:
-			msg='LIMIT STATE [%i] REACHED on %s-axis: %s'%(LSTATE,
-														   axis,
-														   msg)
-			self.log.error(msg)
-			raise InvalidFocusPositionException(msg)
-			return -1
+    @lock
+    def moveTo(self, position, axis=FocuserAxis.Z):
 
-		self._position[axis.index] = n
+        self.log.debug('Setting offset on %s-axis to %f %s ...' % (axis,
+                                                                   position * self._step[axis],
+                                                                   self[AxisUnit[axis]]))
 
-		return 0
+        if self._inRange(position * self._step[axis], axis):
+            self._setPosition(position * self._step[axis], axis)
+        else:
+            raise InvalidFocusPositionException("%f %s is outside focuser "
+                                                "boundaries." % (position * self._step[axis],
+                                                                 self[AxisUnit[axis]]))
 
-	def _inRange(self, n,axis=Axis.Z):
-		min_pos, max_pos = self.getRange(axis)
-		if not min_pos or not max_pos:
-			self.log.warning('Minimum and maximum positions not defined...')
-			return True
-		return (min_pos <= n <= max_pos)
+    def getPosition(self, axis=FocuserAxis.Z):
+        return self._position[axis] # self.getTPL().getobject('POSITION.INSTRUMENTAL.FOCUS[%i].REALPOS' % axis.index)
 
-	def getAxis(self,axis=Axis.Z):
+    def getRange(self, axis=FocuserAxis.Z):
+        return self._range[axis]
 
-		if type(axis) == str:
-			return Axis.fromStr(axis)
-		elif type(axis) == int:
-			return Axis[axis]
-		elif type(axis) == type(Axis.Z):
-			return axis
-		else:
-			ldir = ''
-			for i in Axis:
-				ldir+=str(i)
-			raise AstelcoHexapodException('Direction not valid! Try one of %s'%ldir)
+    def getTemperature(self):
+        return self._temperature
+
+    def getMetadata(self, request):
+
+        hdr_ = [('FOCUSER', str(self['model']), 'Focuser Model'),
+                ('FOCUS', self.getPosition(Axis.Z),'Focuser position used for this observation'),
+                ('ZHEX' , self.getPosition(Axis.Z),'Focuser position used for this observation'),
+                ('DZHEX', self.getOffset(Axis.Z),'Focuser offset position used for this observation')]
+        if self['hexapod']:
+            for ax in ControllableAxis:
+                hdr_.append([('%sHEX'%ControllableAxis[ax],
+                              self.getPosition(ControllableAxis[ax]),
+                              'Focuser position in %s used for this observation'%ControllableAxis[ax]),
+                             ('D%sHEX'%ControllableAxis[ax],
+                              self.getOffset(ControllableAxis[ax]),
+                              'Focuser offset position in %s used for this observation'%ControllableAxis[ax])])
+        return hdr_
+
+    # utility functions
+
+    def getOffset(self,axis=Axis.Z):
+        return self._offset[axis]
+        # tpl = self.getTPL()
+        # if self['hexapod']:
+        #     return self.getTPL().getobject('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET' % axis.index)
+        # else:
+        #     return tpl.getobject('POSITION.INSTRUMENTAL.FOCUS.OFFSET')
+
+    @lock
+    def updatePosition(self):
+        tpl = self.getTPL()
+        for ax in Axis:
+            self._position[ax] = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].REALPOS' % ax.index)
+            self._offset[ax] = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET' % ax.index)
+
+    @lock
+    def updateTemperature(self):
+        pass
 
 
-'''
+    @lock
+    def _setPosition(self, n, axis=Axis.Z):
+        self.log.info("Changing focuser offset to %s" % n)
 
+        cmdid = None
+        tpl = self.getTPL()
 
+        start = time.time()
+        if self['hexapod']:
+            cmdid = tpl.set('POSITION.INSTRUMENTAL.FOCUS[%i].OFFSET' % axis.index, n)
+        else:
+            cmdid = tpl.set('POSITION.INSTRUMENTAL.FOCUS.OFFSET', n)
 
+        if not cmdid:
+            msg = "Could not change focus offset to %f %s" % (n * self._step[axis],
+                                                              self[AxisUnit[axis]])
+            self.log.error(msg)
+            raise InvalidFocusPositionException(msg)
 
+        MSTATE = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].MOTION_STATE' % axis.index)
+        mbitcode = [0, 1, 2, 3, 4]
+        MMESSG = ['Axis is moving',
+                  'Trajectory is running',
+                  'Movement is blocked',
+                  'Axis reached desired position',
+                  'Axis moving too fast']
+        moving = True
+        self._abort.clear()
+        cmd = tpl.getCmd(cmdid)
+        while moving:
+            if cmd.complete:
+                moving = False
+                break
+            MSTATE = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].MOTION_STATE' % axis.index)
+            moving = MSTATE != 0
+            state = moving
+            msg = ''
+            for ib, bit in enumerate(mbitcode):
+                if ( MSTATE & (1 << bit) ) != 0:
+                    #STATE = False
+                    msg += MMESSG[ib] + '|'
+            if len(msg) > 0:
+                self.log.info(msg)
+            if time.time() > start+self["move_timeout"]:
+                raise AstelcoHexapodException("Operation timed out.")
+            if self._abort.isSet():
+                self.log.info('Operation aborted')
+                # Todo: abort operation
+                break
+            cmd = tpl.getCmd(cmdid)
+        # check limit state
+        LSTATE = tpl.getobject('POSITION.INSTRUMENTAL.FOCUS[%i].LIMIT_STATE' % axis.index)
+        #code = '%16s'%(bin(LSTATE)[2:][::-1])
+        bitcode = [0, 1, 7, 8, 9, 15]
+        LMESSG = ['MINIMUM HARDWARE LIMIT',
+                  'MAXIMUM HARDWARE LIMIT',
+                  'HARDWARE BLOCK',
+                  'MINIMUM SOFTWARE LIMIT',
+                  'MAXIMUM SOFTWARE LIMIT',
+                  'SOFTWARE BLOCK']
+        STATE = True
+        msg = ''
+        for ib, bit in enumerate(bitcode):
+            if ( LSTATE & (1 << bit) ) != 0:
+                STATE = False
+                msg += LMESSG[ib] + '|'
 
-	def _move(self, direction, steps,axis=Axis.Z):
+        if not STATE:
+            msg = 'LIMIT STATE [%i] REACHED on %s-axis: %s' % (LSTATE,
+                                                               axis,
+                                                               msg)
+            self.log.error(msg)
+            raise InvalidFocusPositionException(msg)
+            #return -1
 
-		if direction not in Direction:
-			raise ValueError("Invalid direction '%s'." % direction)
+        # self._position[axis.index] = n
+        self.updatePosition()
 
-		if axis not in Axis:
-			raise ValueError("Invalid axis '%s'." % axis)
+        return 0
 
-		if not self._inRange(direction, steps, axis):
-			raise InvalidFocusPositionException(
-												"%d is outside focuser limits." % steps)
-		
-		self._moveTo(direction, steps, Axis.Z)
-		
-		return True
+    def _inRange(self, n, axis=Axis.Z):
+        min_pos, max_pos = self.getRange(axis)
+        if not min_pos or not max_pos:
+            self.log.warning('Minimum and maximum positions not defined...')
+            return True
+        return min_pos <= n <= max_pos
 
-
-	def _inRange(self, direction, n, axis=Axis.Z):
-
-		# Assumes:
-		#   0 -------  N
-		#  IN         OUT
-
-		current = self.getPosition(axis)
-
-		if direction == Direction.IN:
-			target = current - n
-		else:
-			target = current + n
-
-		min_pos, max_pos = self.getRange(axis)
-
-		return (min_pos <= target <= max_pos)
-
-
-	def getPosition(self,axis=Axis.Z):
-		return self._position[axis]
-
-	def getRange(self,axis=Axis.Z):
-		return self._range[axis]
-
-'''
+    def getTPL(self):
+        try:
+            p = self.getManager().getProxy(self['tpl'], lazy=True)
+            if not p.ping():
+                return False
+            else:
+                return p
+        except ObjectNotFoundException:
+            return False
