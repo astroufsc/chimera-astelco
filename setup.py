@@ -5,9 +5,9 @@ setup(
     version='0.0.1',
     packages=['chimera_astelco', 'chimera_astelco.instruments'],
     scripts=['scripts/chimera-astelcopm'],
-    url='http://github.com/astroufsc/chimera_template',
+    url='https://github.com/astroufsc/chimera-astelco',
     license='GPL v2',
     author='Tiago Ribeiro',
     author_email='tribeiro@ufs.br',
-    description='Chimera pluging for astelco system.'
+    description='Chimera pluging for ASTELCO system.'
 )
