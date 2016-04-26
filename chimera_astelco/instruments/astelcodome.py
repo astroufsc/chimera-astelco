@@ -28,7 +28,7 @@ from chimera.util.coord import Coord
 
 from chimera.interfaces.dome import DomeStatus
 from chimera.instruments.dome import DomeBase
-from chimera.interfaces.dome import Mode
+from chimera.interfaces.dome import Mode, InvalidDomePositionException
 
 from chimera.core.lock import lock
 from chimera.core.exceptions import ObjectNotFoundException
@@ -118,7 +118,7 @@ class AstelcoDome(DomeBase):
             caz = self.getAz()
 
             while self.isSlewing():
-                time.sleep(1.0)
+                # time.sleep(1.0)
                 if time.time() > (start_time + self._maxSlewTime):
                     self.log.warning('Dome syncronization timed-out...')
                     self.slewComplete(self.getAz(), DomeStatus.TIMEOUT)
@@ -171,6 +171,16 @@ class AstelcoDome(DomeBase):
 
             self.slewComplete(self.getAz(), DomeStatus.OK)
 
+    def syncWithTel(self):
+        self.syncBegin()
+
+        self.log.debug('[sync] Sync dome with telescope')
+
+        if self.getMode() == Mode.Track:
+            self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...')
+
+        self.log.debug('[sync] Sync dome with telescope')
+        self.syncComplete()
 
     @lock
     def stand(self):
@@ -268,7 +278,7 @@ class AstelcoDome(DomeBase):
         self._abort.clear()
         tpl = self.getTPL()
 
-        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 1, wait=False)
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 2, wait=False)
 
         time_start = time.time()
 
@@ -284,14 +294,23 @@ class AstelcoDome(DomeBase):
             cmd = tpl.getCmd(cmdid)
 
 
-        realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+        return DomeStatus.OK
 
-        if realpos == 1:
-            return DomeStatus.OK
+        # realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
+        #
+        # if realpos == 1:
+        #     return DomeStatus.OK
+        #
+        # self.log.warning('Slit opened! Opening Flap...')
 
-        self.log.warning('Slit opened! Opening Flap...')
+    def openFlap(self):
 
-        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 1, wait=False)
+        if not self.isSlitOpen():
+            self.log.warning('Slit is closed. Cannot open Flap.')
+            raise InvalidDomePositionException("Cannot open dome flap with slit closed.")
+
+        tpl = self.getTPL()
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 4, wait=False)
         cmd = tpl.getCmd(cmdid)
 
         time_start = time.time()
@@ -319,6 +338,8 @@ class AstelcoDome(DomeBase):
         if not self.isSlitOpen():
             self.log.info('Slit already closed')
             return 0
+        elif self.isFlapOpen():
+            self.log.warning("Flap is open. Closing everything...")
 
         self.log.info("Closing slit")
 
@@ -359,15 +380,54 @@ class AstelcoDome(DomeBase):
 
         return DomeStatus.OK
 
+    @lock
+    def closeFlap(self):
+
+        # Todo: Implement Close Flap. Still needs to find a way to close the flap.
+        if not self.isFlapOpen():
+            self.log.info('Flap already closed')
+            return 0
+
+        tpl = self.getTPL()
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 4,wait=False)
+
+        time_start = time.time()
+
+        cmd = tpl.getCmd(cmdid)
+
+        self._abort.clear()
+
+        while not cmd.complete:
+
+            if self._abort.isSet():
+                return DomeStatus.ABORTED
+            elif time.time() > time_start + self._maxSlewTime:
+                return DomeStatus.TIMEOUT
+
+            cmd = tpl.getCmd(cmdid)
+
+        while self.isFlapOpen():
+
+            if self._abort.isSet():
+                return DomeStatus.ABORTED
+            elif time.time() > time_start + self._maxSlewTime:
+                return DomeStatus.TIMEOUT
+
+        return DomeStatus.OK
+
     def slitMoving(self):
         # Todo: Find command to check if slit is movng
         return False
 
     def isSlitOpen(self):
         tpl = self.getTPL()
-        self._slitPos = tpl.getobject('AUXILIARY.DOME.REALPOS')
-        self._slitOpen = self._slitPos > 0
-        return self._slitOpen
+        openmask = tpl.getobject('AUXILIARY.DOME.OPEN_MASK')
+        return (openmask & (1 << 1)) != 0
+
+    def isFlapOpen(self):
+        tpl = self.getTPL()
+        openmask = tpl.getobject('AUXILIARY.DOME.OPEN_MASK')
+        return (openmask & (1 << 2)) != 0
 
     # utilitaries
     def getTPL(self):
@@ -381,6 +441,12 @@ class AstelcoDome(DomeBase):
             return False
 
     def getMetadata(self, request):
+        # Check first if there is metadata from an metadata override method.
+        md = self.getMetadataOverride(request)
+        if md is not None:
+            return md
+        # If not, just go on with the instrument's default metadata.
+
         baseHDR = super(DomeBase, self).getMetadata(request)
         newHDR = [("DOME_AZ",self.getAz().toDMS().__str__(),"Dome Azimuth"),
                   ("D_OFFSET",self.getAzOffset().toDMS().__str__(),"Dome Azimuth offset")]

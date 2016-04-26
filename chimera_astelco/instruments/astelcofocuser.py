@@ -118,8 +118,6 @@ vector. Temperature compensation can also be performed.
 
     def __start__(self):
 
-        self.open()
-
         tpl = self.getTPL()
         # range and step setting
         if self['hexapod']:
@@ -128,7 +126,7 @@ vector. Temperature compensation can also be performed.
                 self._supports[i] = True
                 self._position[ControllableAxis[i]] = None
                 self._offset[ControllableAxis[i]] = None
-                self._rangeControllableAxis[i] = [None, None]
+                self._range[i] = [None, None]
                 self._step[ControllableAxis[i]] = float(self[AxisStep[ControllableAxis[i]]])
 
             for ax in Axis:
@@ -225,6 +223,11 @@ vector. Temperature compensation can also be performed.
         return self._temperature
 
     def getMetadata(self, request):
+        # Check first if there is metadata from an metadata override method.
+        md = self.getMetadataOverride(request)
+        if md is not None:
+            return md
+        # If not, just go on with the instrument's default metadata.
 
         hdr_ = [('FOCUSER', str(self['model']), 'Focuser Model'),
                 ('FOCUS', self.getPosition(Axis.Z),'Focuser position used for this observation'),

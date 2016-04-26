@@ -37,7 +37,7 @@ from chimera.instruments.telescope import TelescopeBase
 from chimera.interfaces.telescope import SlewRate, AlignMode, TelescopeStatus
 
 from chimera.util.coord import Coord
-from chimera.util.position import Position
+from chimera.util.position import Position, Epoch
 from chimera.util.enum import Enum
 
 from chimera.core.lock import lock
@@ -58,7 +58,7 @@ AstelcoTelescopeStatus = Enum("NoLICENSE",
 class AstelcoTelescope(TelescopeBase):  # converted to Astelco
 
     __config__ = {'azimuth180Correct': False,
-                  'maxidletime': 90.,
+                  'maxidletime': 1.,
                   'parktimeout': 600.,
                   'sensors': 7,
                   'pointing_model': None,      # The filename of the pointing model. None is leave as is
@@ -132,13 +132,6 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
 
         return True
 
-    def __stop__(self):  # converted to Astelco
-
-        # if self.isSlewing():
-        #     self.abortSlew()
-
-        return True
-
     @lock
     def open(self):  # converted to Astelco
 
@@ -208,10 +201,10 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
             # tpl.set('POINTING.SETUP.ORIENTATION',2) # AUTOMATIC SELECTION
             # tpl.set('POINTING.SETUP.OPTIMIZATION',2) # MINIMIZE SLEW TIME
 
-            # self.getRa()
-            # self.getDec()
-            # self.getAlt()
-            # self.getAz()
+            self.getRa()
+            self.getDec()
+            self.getAlt()
+            self.getAz()
 
             return True
 
@@ -230,31 +223,30 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
 
         #self.log.debug('[control] %s'%self._tpl.getobject('SERVER.UPTIME'))
 
-        status = self.getTelescopeStatus()
-
-        if status == AstelcoTelescopeStatus.OK:
-            self.log.debug('[control] Status: %s' % status)
-            return True
-        elif status == AstelcoTelescopeStatus.WARNING or status == AstelcoTelescopeStatus.INFO:
-            self.log.info('[control] Got telescope status "%s", trying to acknowledge it... ' % status)
-            self.logStatus()
-            self.acknowledgeEvents()
-        elif status == AstelcoTelescopeStatus.PANIC or status == AstelcoTelescopeStatus.ERROR:
-            self.logStatus()
-            self.log.error('[control] Telescope in %s mode!' % status)
-            # What should be done? Try to acknowledge and if that fails do what?
-        else:
-            self.logStatus()
-            self.log.error('[control] Telescope in %s mode!' % status)
-            # return False
-
         # Update sensor and coordinate information
         self.updateSensors()
 
-        # self.getRa()
-        # self.getDec()
-        # self.getAlt()
-        # self.getAz()
+        status = self.getTelescopeStatus()
+
+        try:
+            if status == AstelcoTelescopeStatus.OK:
+                # self.log.debug('[control] Status: %s' % status)
+                return True
+            elif status == AstelcoTelescopeStatus.WARNING or status == AstelcoTelescopeStatus.INFO:
+                self.log.info('[control] Got telescope status "%s", trying to acknowledge it... ' % status)
+                self.logStatus()
+                self.acknowledgeEvents()
+            elif status == AstelcoTelescopeStatus.PANIC or status == AstelcoTelescopeStatus.ERROR:
+                self.logStatus()
+                self.log.error('[control] Telescope in %s mode!' % status)
+                # What should be done? Try to acknowledge and if that fails do what?
+            else:
+                self.logStatus()
+                self.log.error('[control] Telescope in %s mode!' % status)
+                # return False
+        except Exception, e:
+            self.log.exception(e)
+            pass
 
         return True
 
@@ -476,6 +468,7 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
 
         self.log.debug('Setting target RA/DEC')
         self.setTargetRaDec(position.ra, position.dec)
+        self.setTargetEpoch(position.epoch)
         self.log.debug('Done')
 
         status = TelescopeStatus.OK
@@ -784,11 +777,8 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
     def _isSlewing(self):
 
         tpl = self.getTPL()
-        self.log.debug('GET TELESCOPE.MOTION_STATE')
         mstate = tpl.getobject('TELESCOPE.MOTION_STATE')
-        self.log.debug('GET POINTING.TRACK')
         ptrack = tpl.getobject('POINTING.TRACK')
-        self.log.debug('Done')
 
         self._slewing = (int(mstate) != 0) and (int(ptrack) != 1)
 
@@ -1001,36 +991,19 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
         tpl.set('TELESCOPE.STOP', 1, wait=True)
         return True
 
-    @lock
-    def _getRa(self):
-        if not self._ra:
-            return self.getRa()
-        return self._ra
-
-    @lock
-    def _getDec(self):
-        if not self._dec:
-            return self.getDec()
-
-        return self._dec
-
-    @lock
     def getRa(self):  # converted to Astelco
 
         tpl = self.getTPL()
         ret = tpl.getobject('POSITION.EQUATORIAL.RA_J2000')
         if ret:
             self._ra = Coord.fromH(ret)
-        self.log.debug('Ra: %s' % ret)
         return self._ra
 
-    @lock
     def getDec(self):  # converted to Astelco
         tpl = self.getTPL()
         ret = tpl.getobject('POSITION.EQUATORIAL.DEC_J2000')
         if ret:
             self._dec = Coord.fromD(ret)
-        self.log.debug('Dec: %s' % ret)
         return self._dec
 
     @lock
@@ -1101,43 +1074,34 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
         return True
 
     @lock
+    def setTargetEpoch(self, epoch):  # converted to Astelco
+
+        if type(epoch) != type(Epoch.J2000):
+            self.log.warning("Given value is not a valid epoch. Using J2000.")
+            epoch = Epoch.J2000
+
+        tpl = self.getTPL()
+        cmdid = tpl.set('OBJECT.EQUATORIAL.EPOCH', float(epoch.__str__()[1:]), wait=True)
+
+        ret = tpl.succeeded(cmdid)
+
+        if not ret:
+            raise AstelcoException("Invalid EPOCH '%s'" % epoch)
+
+        return True
+
+    @lock
     def getTargetDec(self):  # converted to Astelco
         tpl = self.getTPL()
         ret = tpl.getobject('OBJECT.EQUATORIAL.DEC')
 
         return Coord.fromD(ret)
 
-    @lock
-    def _getAz(self):  # converted to Astelco
-
-        if not self._az:
-            return self.getAz()
-
-        c = self._az  #Coord.fromD(ret)
-
-        if self['azimuth180Correct']:
-            if c.toD() >= 180:
-                c = c - Coord.fromD(180)
-            else:
-                c = c + Coord.fromD(180)
-
-        return c
-
-    @lock
-    def _getAlt(self):  # converted to Astelco
-        if not self._alt:
-            return self.getAlt()
-
-        return self._alt
-
-    @lock
     def getAz(self):  # converted to Astelco
         tpl = self.getTPL()
         ret = tpl.getobject('POSITION.HORIZONTAL.AZ')
         if ret:
             self._az = Coord.fromD(ret)
-        self.log.debug('Az: %s' % ret)
-
         c = self._az  #Coord.fromD(ret)
 
         if self['azimuth180Correct']:
@@ -1148,13 +1112,11 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
 
         return c
 
-    @lock
     def getAlt(self):  # converted to Astelco
         tpl = self.getTPL()
         ret = tpl.getobject('POSITION.HORIZONTAL.ALT')
         if ret:
             self._alt = Coord.fromD(ret)
-        self.log.debug('Alt: %s' % ret)
 
         return self._alt
 
@@ -1228,7 +1190,6 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
         except:
             pass
         return True
-
 
     @lock
     def getLat(self):  # converted to Astelco
@@ -1748,6 +1709,12 @@ class AstelcoTelescope(TelescopeBase):  # converted to Astelco
         self.sensors = sensors
 
     def getMetadata(self, request):
+        # Check first if there is metadata from an metadata override method.
+        md = self.getMetadataOverride(request)
+        if md is not None:
+            return md
+        # If not, just go on with the instrument's default metadata.
+
         lst = self.getLocalSiderealTime()
         baseHDR = [('TELESCOP', self['model'], 'Telescope Model'),
                 ('OPTICS', self['optics'], 'Telescope Optics Type'),
