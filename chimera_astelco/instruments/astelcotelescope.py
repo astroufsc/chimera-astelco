@@ -34,7 +34,7 @@ except ImportError:
     import pickle
 
 from chimera.instruments.telescope import TelescopeBase
-from chimera.interfaces.telescope import SlewRate, AlignMode, TelescopeStatus
+from chimera.interfaces.telescope import SlewRate, AlignMode, TelescopeStatus, TelescopeCover
 
 from chimera.util.coord import Coord
 from chimera.util.position import Position, Epoch
@@ -55,7 +55,7 @@ AstelcoTelescopeStatus = Enum("NoLICENSE",
                               "WARNING",
                               "INFO")
 
-class AstelcoTelescope(TelescopeBase):  # converted to Astelco
+class AstelcoTelescope(TelescopeBase, TelescopeCover):  # converted to Astelco
 
     __config__ = {'azimuth180Correct': False,
                   'maxidletime': 1.,
