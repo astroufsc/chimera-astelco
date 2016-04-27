@@ -171,16 +171,17 @@ class AstelcoDome(DomeBase):
 
             self.slewComplete(self.getAz(), DomeStatus.OK)
 
+    @lock
     def syncWithTel(self):
         self.syncBegin()
 
-        self.log.debug('[sync] Sync dome with telescope')
+        self.log.debug('[sync] Check if dome is in sync with telescope')
 
         if self.getMode() == Mode.Track:
             self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...')
 
-        self.log.debug('[sync] Sync dome with telescope')
         self.syncComplete()
+        self.log.debug('[sync] Dome in sync')
 
     @lock
     def stand(self):
