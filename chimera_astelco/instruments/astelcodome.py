@@ -244,13 +244,9 @@ class AstelcoDome(DomeBase):
     def getMode(self):
 
         tpl = self.getTPL()
-        self._syncmode = tpl.getobject('POINTING.SETUP.DOME.SYNCMODE')
+        syncmode = tpl.getobject('POINTING.SETUP.DOME.SYNCMODE')
 
-        if self._syncmode == 0:
-            self._mode = Mode.Stand
-        else:
-            self._mode = Mode.Track
-        return self._mode
+        return Mode.Stand if syncmode == 0 else Mode.Track
 
     @lock
     def open(self):
