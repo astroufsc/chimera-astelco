@@ -138,8 +138,6 @@ class AstelcoDome(DomeBase):
         else:
             self.log.info('Slewing to %f...' % az)
 
-            self.slewBegin(az)
-
             start_time = time.time()
             self._abort.clear()
             self._slewing = True
@@ -147,6 +145,7 @@ class AstelcoDome(DomeBase):
 
             tpl = self.getTPL()
 
+            self.slewBegin(az)
             tpl.set('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS', '%f' % az)
 
             time.sleep(self['stabilization_time'])
@@ -155,7 +154,7 @@ class AstelcoDome(DomeBase):
 
                 if time.time() > (start_time + self._maxSlewTime):
                     self.log.warning('Dome syncronization timed-out...')
-                    self.slewComplete(self.getAz(), DomeStatus.TIMEOUT)
+                    self.slewComplete(self.getAz(), DomeStatus.ABORTED)
                     return 0
                 elif self._abort.isSet():
                     self._slewing = False
@@ -178,7 +177,20 @@ class AstelcoDome(DomeBase):
         self.log.debug('[sync] Check if dome is in sync with telescope')
 
         if self.getMode() == Mode.Track:
-            self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...')
+            self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...'
+                             'Waiting for dome to reach expected position')
+
+        start_time = time.time()
+
+        tpl = self.getTPL()
+        target_az = tpl.getobject('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS')
+        while True:
+            if time.time() > (start_time + self._maxSlewTime):
+                self.syncComplete()
+                raise AstelcoDomeException("Dome synchronization timed-out")
+            elif abs(self.getAz() - target_az) < 1e-1:
+                break
+
 
         self.syncComplete()
         self.log.debug('[sync] Dome in sync')

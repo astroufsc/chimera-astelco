@@ -202,16 +202,19 @@ vector. Temperature compensation can also be performed.
     @lock
     def moveTo(self, position, axis=FocuserAxis.Z):
 
-        self.log.debug('Setting offset on %s-axis to %f %s ...' % (axis,
-                                                                   position * self._step[axis],
-                                                                   self[AxisUnit[axis]]))
+        self.log.debug('Setting position on %s-axis to %f %s ...' % (axis,
+                                                                     position * self._step[axis],
+                                                                     self[AxisUnit[axis]]))
 
-        if self._inRange(position * self._step[axis], axis):
-            self._setPosition(position * self._step[axis], axis)
+        self.updatePosition()
+        current_position = self.getPosition(axis)
+        offset = position * self._step[axis] - current_position
+
+        if offset > 0.:
+            self.moveOut(offset,axis)
         else:
-            raise InvalidFocusPositionException("%f %s is outside focuser "
-                                                "boundaries." % (position * self._step[axis],
-                                                                 self[AxisUnit[axis]]))
+            self.moveIn(offset,axis)
+
 
     def getPosition(self, axis=FocuserAxis.Z):
         return self._position[axis] # self.getTPL().getobject('POSITION.INSTRUMENTAL.FOCUS[%i].REALPOS' % axis.index)
