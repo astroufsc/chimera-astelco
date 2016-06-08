@@ -180,16 +180,18 @@ class AstelcoDome(DomeBase):
             self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...'
                              'Waiting for dome to reach expected position')
 
-        start_time = time.time()
+            start_time = time.time()
 
-        tpl = self.getTPL()
-        target_az = tpl.getobject('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS')
-        while True:
-            if time.time() > (start_time + self._maxSlewTime):
-                self.syncComplete()
-                raise AstelcoDomeException("Dome synchronization timed-out")
-            elif abs(self.getAz() - target_az) < 1e-1:
-                break
+            tpl = self.getTPL()
+            target_az = tpl.getobject('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS')
+            while True:
+                caz = self.getAz()
+                self.log.debug('Current az: %f | Target az: %f' % (caz, target_az))
+                if time.time() > (start_time + self._maxSlewTime):
+                    self.syncComplete()
+                    raise AstelcoDomeException("Dome synchronization timed-out")
+                elif abs(caz - target_az) < 1.:
+                    break
 
 
         self.syncComplete()
