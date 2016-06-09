@@ -213,7 +213,7 @@ vector. Temperature compensation can also be performed.
 
         offset = zero / self._step[axis] - position
 
-        offset *= -1
+        # offset *= -1
         self.log.debug("zero: %f | Offset: %f" % (zero,
                                                   offset))
 
