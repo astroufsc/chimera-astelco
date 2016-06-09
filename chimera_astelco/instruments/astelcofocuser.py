@@ -211,7 +211,7 @@ vector. Temperature compensation can also be performed.
         current_offset = self.getOffset(axis)
         zero = current_position - current_offset
 
-        offset = zero / self._step[axis] - position
+        offset = zero - position * self._step[axis]
 
         # offset *= -1
         self.log.debug("current: %f | Offset: %f" % (zero,
