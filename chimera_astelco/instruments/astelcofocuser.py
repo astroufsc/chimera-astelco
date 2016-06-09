@@ -213,13 +213,14 @@ vector. Temperature compensation can also be performed.
 
         offset = zero / self._step[axis] - position
 
+        offset *= -1
         self.log.debug("zero: %f | Offset: %f" % (zero,
                                                   offset))
 
-        # if offset > 0.:
-        #     self.moveOut(offset,axis)
-        # else:
-        #     self.moveIn(offset,axis)
+        if offset > 0.:
+            self.moveOut(offset,axis)
+        else:
+            self.moveIn(offset,axis)
 
 
     def getPosition(self, axis=FocuserAxis.Z):
