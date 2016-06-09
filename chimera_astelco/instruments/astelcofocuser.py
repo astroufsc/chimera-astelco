@@ -202,14 +202,14 @@ vector. Temperature compensation can also be performed.
     @lock
     def moveTo(self, position, axis=FocuserAxis.Z):
 
-        self.log.debug('Setting position on %s-axis to %f %s ...' % (axis,
+        self.log.debug('Setting position on %s-axis to %f %s.' % (axis,
                                                                      position * self._step[axis],
                                                                      self[AxisUnit[axis]]))
 
         self.updatePosition()
         current_position = self.getPosition(axis)
         current_offset = self.getOffset(axis)
-        offset = position * self._step[axis] - current_position + current_offset
+        offset = position * self._step[axis] - current_position - current_offset
 
         if offset > 0.:
             self.moveOut(offset,axis)
