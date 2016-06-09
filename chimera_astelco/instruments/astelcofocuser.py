@@ -211,16 +211,22 @@ vector. Temperature compensation can also be performed.
         current_offset = self.getOffset(axis)
         zero = current_position - current_offset
 
-        offset = current_position / self._step[axis] - position
+        offset = zero / self._step[axis] - position
 
         # offset *= -1
         self.log.debug("current: %f | Offset: %f" % (zero,
                                                     offset))
 
-        if offset > 0.:
-            self.moveOut(offset,axis)
+        if self._inRange(offset, axis):
+            self._setPosition(offset, axis)
         else:
-            self.moveIn(offset,axis)
+            raise InvalidFocusPositionException("%d is outside focuser "
+                                                "boundaries." % offset)
+
+        # if offset > 0.:
+        #     self.moveOut(offset,axis)
+        # else:
+        #     self.moveIn(offset,axis)
 
 
     def getPosition(self, axis=FocuserAxis.Z):
