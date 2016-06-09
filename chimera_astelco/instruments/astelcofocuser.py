@@ -209,7 +209,7 @@ vector. Temperature compensation can also be performed.
         self.updatePosition()
         current_position = self.getPosition(axis)
         current_offset = self.getOffset(axis)
-        offset = (current_position - current_offset) - position / self._step[axis]
+        offset = (current_position - current_offset) * self._step[axis] - position
 
         self.log.debug("Current pos: %f | Desired pos: %f | Current offset: %f | Offset: %f" % (current_position,
                                                                            position,
