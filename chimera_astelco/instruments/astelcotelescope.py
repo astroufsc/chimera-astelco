@@ -179,7 +179,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
             ptm_type = tpl.getobject('POINTING.MODEL.TYPE')
             pt_model = tpl.getobject('POINTING.MODEL.FILE')
             modelinfo = tpl.getobject('POINTING.MODEL.CALCULATE')
-            mtype = 'None' if ptm_type == 0 else 'NORMAL' if ptm_type == 1 else "EXTENDED"
+            mtype = 'NONE' if ptm_type == -1 else tpl.getobject('POINTING.MODEL.DATA[%i].NAME' % ptm_type)
             self.log.debug('Pointing model info:\n\tNAME: %s\n\tTYPE: %s\n\tQUALITY: %s.'%(pt_model,mtype,modelinfo))
 
             # Setting up POINTING

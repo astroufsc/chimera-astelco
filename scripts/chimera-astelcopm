@@ -186,10 +186,14 @@ class ChimeraAstelcoPointingModel(ChimeraCLI):
     def calculate(self, options):
         telescope = self.telescope
         self.out(40 * "=")
-        typeId = lambda tp: 1 if tp == 'classic' else 2
+        typeId = lambda tp: 0 if tp == 'classic' else 1
+        modeId = lambda tp: 1 if tp == 'calculate' else 2
         self.out('Calculate pointing model %s in %s mode.'%(options.type,
                                                             options.mode))
-        telescope.calculatePM(typeId(options.type))
+        self.out('Setting pointing model type to %s' % options.type)
+        telescope.setPMType(typeId(options.type))
+        self.out('Calculating pointing model in %s mode' % options.mode)
+        telescope.calculatePM(modeId(options.mode))
         self.out(40 * "=")
 
     @action(help="Add current pointing to table.")
@@ -225,5 +229,4 @@ def main():
 if __name__ == '__main__':
     freeze_support()
     main()
-
 
