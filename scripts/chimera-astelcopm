@@ -98,7 +98,7 @@ class ChimeraAstelcoPointingModel(ChimeraCLI):
                            dict(name="type",
                                 long="type",
                                 type=ParameterType.CHOICE,
-                                choices=["classic","extended"],
+                                choices=["none","classic","extended"],
                                 helpGroup="CALCULATE",
                                 help="Calculates model coeficients. Reset will set all offsets to zero."))
 
@@ -186,12 +186,14 @@ class ChimeraAstelcoPointingModel(ChimeraCLI):
     def calculate(self, options):
         telescope = self.telescope
         self.out(40 * "=")
-        typeId = lambda tp: 0 if tp == 'classic' else 1
+        typeDict = {'none' : -1,
+                    'classic' : 0,
+                    'extended' : 1}
         modeId = lambda tp: 1 if tp == 'calculate' else 2
         self.out('Calculate pointing model %s in %s mode.'%(options.type,
                                                             options.mode))
         self.out('Setting pointing model type to %s' % options.type)
-        telescope.setPMType(typeId(options.type))
+        telescope.setPMType(typeDict[options.type])
         self.out('Calculating pointing model in %s mode' % options.mode)
         telescope.calculatePM(modeId(options.mode))
         self.out(40 * "=")
