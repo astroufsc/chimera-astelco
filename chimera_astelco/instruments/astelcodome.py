@@ -190,7 +190,7 @@ class AstelcoDome(DomeBase):
                 if time.time() > (start_time + self._maxSlewTime):
                     self.syncComplete()
                     raise AstelcoDomeException("Dome synchronization timed-out")
-                elif abs(caz - target_az) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION'):
+                elif abs(caz - target_az) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
                     break
 
 
