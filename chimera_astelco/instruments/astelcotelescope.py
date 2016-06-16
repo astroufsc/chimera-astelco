@@ -725,7 +725,8 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
         tpl = self.getTPL()
         ptm_type = tpl.getobject('POINTING.MODEL.TYPE')
-        mtype = 'None' if ptm_type == 0 else 'NORMAL' if ptm_type == 1 else "EXTENDED"
+        mtype = 'None' if ptm_type == -1 else tpl.getobject('POINTING.MODEL.DATA[%i].NAME' % ptm_type)
+        #'CLASSIC' if ptm_type == 0 else "EXTENDED"
         return ptm_type,mtype
 
     def setPMType(self,type):
@@ -734,11 +735,11 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         :return:
         '''
 
-        if type in [0,1,2]:
+        if type in [-1,0,1]:
             tpl = self.getTPL()
             ptm_type = tpl.getobject('POINTING.MODEL.TYPE')
             self['pointing_model_type'] = int(type)
-            tpl.set('POINTING.MODEL.TYPE',int(type))
+            tpl.set('POINTING.MODEL.TYPE',int(type),wait=True)
             return True
         else:
             return False
@@ -785,8 +786,8 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         else:
             tpl = self.getTPL()
             self['pointing_model'] = filename
-            tpl.set('POINTING.MODEL.FILE',filename)
-            tpl.set('POINTING.MODEL.LOAD',1 if overwrite else 2)
+            tpl.set('POINTING.MODEL.FILE',filename,wait=True)
+            tpl.set('POINTING.MODEL.LOAD',1 if overwrite else 2,wait=True)
             return True
 
     def clearPMList(self):
@@ -794,7 +795,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
     def addPM(self,name=""):
         tpl = self.getTPL()
-        cmdid = tpl.set('POINTING.MODEL.ADD',name)
+        cmdid = tpl.set('POINTING.MODEL.ADD',name,wait=True)
         cmd = tpl.getCmd(cmdid)
         return cmd.ok
 
