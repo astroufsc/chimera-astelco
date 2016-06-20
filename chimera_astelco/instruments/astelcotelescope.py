@@ -795,7 +795,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
     def addPM(self,name=""):
         tpl = self.getTPL()
-        cmdid = tpl.set('POINTING.MODEL.ADD',name,wait=True)
+        cmdid = tpl.set('POINTING.MODEL.ADD',"\"%s\"" % name,wait=True)
         cmd = tpl.getCmd(cmdid)
         return cmd.ok
 
