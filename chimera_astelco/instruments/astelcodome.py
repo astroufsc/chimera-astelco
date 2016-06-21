@@ -400,7 +400,7 @@ class AstelcoDome(DomeBase):
             return 0
 
         tpl = self.getTPL()
-        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 4,wait=False)
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 2,wait=False)
 
         time_start = time.time()
 
