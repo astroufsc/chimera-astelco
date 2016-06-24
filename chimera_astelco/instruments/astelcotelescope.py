@@ -786,7 +786,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         else:
             tpl = self.getTPL()
             self['pointing_model'] = filename
-            tpl.set('POINTING.MODEL.FILE',filename,wait=True)
+            tpl.set('POINTING.MODEL.FILE',"\"%s\"" % filename,wait=True)
             tpl.set('POINTING.MODEL.LOAD',1 if overwrite else 2,wait=True)
             return True
 
