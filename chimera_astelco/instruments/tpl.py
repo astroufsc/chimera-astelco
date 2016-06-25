@@ -95,10 +95,11 @@ class TPL(ChimeraObject):
         # debug log
         # self._debugLog = None
         self._debuglog = logging.getLogger('_tpldebug_')
-        logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl.log")
+        logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl_%s.log"%time.strftime("%Y%m%d-%H%M%S"))
         if os.path.exists(logfile):
             shutil.move(logfile, os.path.join(SYSTEM_CONFIG_DIRECTORY,
                                               "tpl.log_%s"%time.strftime("%Y%m%d-%H%M%S")))
+
 
         _log_handler = logging.FileHandler(logfile)
         _log_handler.setFormatter(logging.Formatter(fmt='%(asctime)s[%(levelname)s:%(threadName)s]-%(name)s-(%(filename)s:%(lineno)d):: %(message)s'))
