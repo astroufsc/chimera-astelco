@@ -96,9 +96,13 @@ class TPL(ChimeraObject):
         # self._debugLog = None
         self._debuglog = logging.getLogger('_tpldebug_')
         logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl_%s.log"%time.strftime("%Y%m%d-%H%M%S"))
-        if os.path.exists(logfile):
-            shutil.move(logfile, os.path.join(SYSTEM_CONFIG_DIRECTORY,
-                                              "tpl.log_%s"%time.strftime("%Y%m%d-%H%M%S")))
+        index = 1
+        while os.path.exists(logfile):
+            logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl_%03i_%s.log"%(index,
+                                                                               time.strftime("%Y%m%d-%H%M%S")))
+            index+=1
+            # shutil.move(logfile, os.path.join(SYSTEM_CONFIG_DIRECTORY,
+            #                                   "tpl.log_%s"%time.strftime("%Y%m%d-%H%M%S")))
 
 
         _log_handler = logging.FileHandler(logfile)
