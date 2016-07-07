@@ -111,9 +111,8 @@ class TPL(ChimeraObject):
 
         # debug log
         # self._debugLog = None
-        self._debuglog = logging.getLogger('_tpldebug_')
-        logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl_%s.log"%time.strftime("%Y%m%d-%H%M%S"))
-        index = 1
+        logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl_001_%s.log"%time.strftime("%Y%m%d-%H%M%S"))
+        index = 2
         while os.path.exists(logfile):
             logfile = os.path.join(SYSTEM_CONFIG_DIRECTORY, "tpl_%03i_%s.log"%(index,
                                                                                time.strftime("%Y%m%d-%H%M%S")))
@@ -121,6 +120,7 @@ class TPL(ChimeraObject):
             # shutil.move(logfile, os.path.join(SYSTEM_CONFIG_DIRECTORY,
             #                                   "tpl.log_%s"%time.strftime("%Y%m%d-%H%M%S")))
 
+        self._debuglog = logging.getLogger('_tpldebug_%03i_'%(index-1))
 
         _log_handler = logging.FileHandler(logfile)
         _log_handler.setFormatter(logging.Formatter(fmt='%(asctime)s[%(levelname)s:%(threadName)s]-%(name)s-(%(filename)s:%(lineno)d):: %(message)s'))
