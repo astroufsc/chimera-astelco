@@ -92,6 +92,23 @@ class TPL(ChimeraObject):
 
         ChimeraObject.__init__(self)
 
+        # Command counter
+        self.next_command_id = 1
+        self.last_cmd_deleted = 0
+
+        # Store received objects
+        self.commands_sent = {}
+
+        self._expect = [ '(?P<CMDID>\d+) DATA INLINE (?P<OBJECT>\S+)=(?P<VALUE>.+)',
+                         '(?P<CMDID>\d+) DATA OK (?P<OBJECT>\S+)',
+                         '(?P<CMDID>\d+) COMMAND (?P<STATUS>\S+)',
+                         '(?P<CMDID>\d+) EVENT ERROR (?P<OBJECT>\S+):(?P<ENCM>(.*?)\s*)']
+
+
+    def __start__(self):
+
+        self.setHz(self['freq'])
+
         # debug log
         # self._debugLog = None
         self._debuglog = logging.getLogger('_tpldebug_')
@@ -111,23 +128,6 @@ class TPL(ChimeraObject):
         self._debuglog.setLevel(logging.DEBUG)
         self._debuglog.addHandler(_log_handler)
         self.log.setLevel(logging.INFO)
-
-        # Command counter
-        self.next_command_id = 1
-        self.last_cmd_deleted = 0
-
-        # Store received objects
-        self.commands_sent = {}
-
-        self._expect = [ '(?P<CMDID>\d+) DATA INLINE (?P<OBJECT>\S+)=(?P<VALUE>.+)',
-                         '(?P<CMDID>\d+) DATA OK (?P<OBJECT>\S+)',
-                         '(?P<CMDID>\d+) COMMAND (?P<STATUS>\S+)',
-                         '(?P<CMDID>\d+) EVENT ERROR (?P<OBJECT>\S+):(?P<ENCM>(.*?)\s*)']
-
-
-    def __start__(self):
-
-        self.setHz(self['freq'])
 
         self._debuglog.debug('tpl START')
         self.open()
