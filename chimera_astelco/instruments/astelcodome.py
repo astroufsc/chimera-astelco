@@ -23,6 +23,7 @@ import os
 import time
 import threading
 import copy
+import numpy as np
 
 from chimera.util.coord import Coord
 
@@ -190,7 +191,7 @@ class AstelcoDome(DomeBase):
                 if time.time() > (start_time + self._maxSlewTime):
                     self.syncComplete()
                     raise AstelcoDomeException("Dome synchronization timed-out")
-                elif abs(caz - target_az) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
+                elif np.ceil(abs(caz - target_az)) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
                     break
 
 
