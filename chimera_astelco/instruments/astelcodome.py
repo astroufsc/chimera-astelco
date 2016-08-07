@@ -189,9 +189,13 @@ class AstelcoDome(DomeBase):
                 caz = self.getAz()
                 self.log.debug('Current az: %f | Target az: %f' % (caz, target_az))
                 if time.time() > (start_time + self._maxSlewTime):
-                    self.syncComplete()
-                    raise AstelcoDomeException("Dome synchronization timed-out")
-                elif abs(caz - target_az)+0.5 < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
+                    if abs(caz - target_az) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 4.0:
+                        self.log.warning("[sync] Dome too far from target position!")
+                        break
+                    else:
+                        self.syncComplete()
+                        raise AstelcoDomeException("Dome synchronization timed-out")
+                elif abs(caz - target_az) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
                     break
 
 

@@ -153,7 +153,23 @@ class TPL(ChimeraObject):
         else:
             return True
 
-        exp_recv = self.expect()
+        try:
+            exp_recv = self.expect()
+        except Exception, e:
+            self.log.error("Could not retrieve information from telescope server. Server may be down! Reconnecting and"
+                           "re-sending incomplete commands.")
+            self.log.exception(e)
+            self._debuglog.exception(e)
+
+            self.disconnect()
+            self.connect()
+            # incomplete = np.array([not cmd.complete for cmd in self.commands_sent.values()])
+            for cmd in self.commands_sent.values():
+                if not cmd.complete:
+                    self._debuglog.warning('Resending: %s' % cmd)
+                    self.send(cmd)
+            return True
+
         self._debuglog.debug('[control] Received %i commands'%len(exp_recv))
 
         for i in range(len(exp_recv)):
@@ -162,7 +178,7 @@ class TPL(ChimeraObject):
             self._debuglog.debug(recv[2])
             cmdid = int(recv[1].group('CMDID'))
             if not cmdid in self.commands_sent.keys():
-                self.log.warning('Received a bad command id %i. Skipping'%cmdid)
+                self._debuglog.warning('Received a bad command id %i. Skipping'%cmdid)
                 continue
 
             self.commands_sent[cmdid].received.append(recv[2])
