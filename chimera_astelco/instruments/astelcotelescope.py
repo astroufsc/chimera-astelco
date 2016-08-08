@@ -1039,7 +1039,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         # time.sleep(self["stabilization_time"])
 
         # no need to check it here...
-        self.trackingStarted()
+        self.trackingStarted(target)
         return TelescopeStatus.OK
 
     def _getOffset(self, direction):
