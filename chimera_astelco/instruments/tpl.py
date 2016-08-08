@@ -26,6 +26,8 @@ import telnetlib
 from collections import defaultdict
 import re
 import shutil
+from threading import Event
+
 from chimera.core.chimeraobject import ChimeraObject
 from chimera.core.lock import lock
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
@@ -71,6 +73,7 @@ class Command():
         self.ok = False
         self.complete = False
         self.data = []
+        self.event = Event()
 
 
     def __str__(self):
@@ -325,6 +328,7 @@ class TPL(ChimeraObject):
         cmd.object = object
         cmd.data = []
         cmd.allstatus = []
+        cmd.event.clear()
 
         self.commands_sent[cmd.id] = cmd
         status = self.send(cmd)
