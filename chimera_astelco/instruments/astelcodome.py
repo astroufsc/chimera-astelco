@@ -26,7 +26,7 @@ import copy
 import numpy as np
 
 from chimera.util.coord import Coord
-
+from chimera.util.position import Position
 from chimera.interfaces.dome import DomeStatus
 from chimera.instruments.dome import DomeBase
 from chimera.interfaces.dome import Mode, InvalidDomePositionException
@@ -37,6 +37,7 @@ from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
 
 from astelcoexceptions import AstelcoException, AstelcoDomeException
 
+
 class AstelcoDome(DomeBase):
     '''
     AstelcoDome interfaces chimera with TSI system to control dome.
@@ -44,8 +45,7 @@ class AstelcoDome(DomeBase):
 
     __config__ = {"maxidletime": 90.,
                   "stabilization_time": 5.,
-                  'tpl':'/TPL/0'}
-
+                  'tpl': '/TPL/0'}
 
     def __init__(self):
         DomeBase.__init__(self)
@@ -73,7 +73,6 @@ class AstelcoDome(DomeBase):
                                                "astelcodome-debug.log"), "w")
         except IOError, e:
             self.log.warning("Could not create astelco debug file (%s)" % str(e))
-
 
     def __start__(self):
 
@@ -110,64 +109,79 @@ class AstelcoDome(DomeBase):
         # in sync or timeout...
 
         if self.getMode() == Mode.Track:
-            self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...')
-            self.slewBegin(az)
-
-            start_time = time.time()
-            self._abort.clear()
-            self._slewing = True
-            caz = self.getAz()
-
-            while self.isSlewing():
-                # time.sleep(1.0)
-                if time.time() > (start_time + self._maxSlewTime):
-                    self.log.warning('Dome syncronization timed-out...')
-                    self.slewComplete(self.getAz(), DomeStatus.TIMEOUT)
-                    return 0
-                elif self._abort.isSet():
-                    self._slewing = False
-                    self.slewComplete(self.getAz(), DomeStatus.ABORTED)
-                    return 0
-                elif abs(caz - self.getAz()) < 1e-6:
-                    self._slewing = False
-                    self.slewComplete(self.getAz(), DomeStatus.OK)
-                    return 0
-                else:
-                    caz = self.getAz()
-
-            self.slewComplete(self.getAz(), DomeStatus.OK)
+            raise AstelcoDomeException('Dome is in track mode... Slew is completely controled by AsTelOS...')
+            # self.log.warning('Dome is in track mode... Slew is completely controled by AsTelOS...')
+            # self.slewBegin(az)
+            #
+            # start_time = time.time()
+            # self._abort.clear()
+            # self._slewing = True
+            # caz = self.getAz()
+            #
+            # while self.isSlewing():
+            #     # time.sleep(1.0)
+            #     if time.time() > (start_time + self._maxSlewTime):
+            #         self.log.warning('Dome syncronization timed-out...')
+            #         self.slewComplete(self.getAz(), DomeStatus.TIMEOUT)
+            #         return 0
+            #     elif self._abort.isSet():
+            #         self._slewing = False
+            #         self.slewComplete(self.getAz(), DomeStatus.ABORTED)
+            #         return 0
+            #     elif abs(caz - self.getAz()) < 1e-6:
+            #         self._slewing = False
+            #         self.slewComplete(self.getAz(), DomeStatus.OK)
+            #         return 0
+            #     else:
+            #         caz = self.getAz()
+            #
+            # self.slewComplete(self.getAz(), DomeStatus.OK)
         else:
             self.log.info('Slewing to %f...' % az)
 
             start_time = time.time()
             self._abort.clear()
             self._slewing = True
-            caz = self.getAz()
+            current_az = self.getAz()
 
             tpl = self.getTPL()
 
             self.slewBegin(az)
-            tpl.set('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS', '%f' % az)
-
-            time.sleep(self['stabilization_time'])
-
-            while self.isSlewing():
-
+            cmdid = tpl.set('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS', '%f' % az)
+            reference_alt = Coord.fromD(0.)
+            desired_position = Position.fromAltAz(reference_alt,
+                                                  az)
+            # Wait for command to be completed
+            cmd = tpl.getCmd(cmdid)
+            while not cmd.complete:
                 if time.time() > (start_time + self._maxSlewTime):
                     self.log.warning('Dome syncronization timed-out...')
                     self.slewComplete(self.getAz(), DomeStatus.ABORTED)
                     return 0
+                cmd = tpl.getCmd(cmdid)
+
+            # time.sleep(self['stabilization_time'])
+            # Wait dome arrive on desired position
+
+            while True:
+
+                current_position = Position.fromAltAz(reference_alt,
+                                                      current_az)
+                if time.time() > (start_time + self._maxSlewTime):
+                    self.slewComplete(self.getAz(), DomeStatus.ABORTED)
+                    raise AstelcoDomeException('Dome syncronization timed-out...')
                 elif self._abort.isSet():
                     self._slewing = False
-                    tpl.set('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS', caz)
+                    tpl.set('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS', current_az)
                     self.slewComplete(self.getAz(), DomeStatus.ABORTED)
                     return 0
-                elif abs(caz - self.getAz()) < 1e-6:
+                elif abs(current_position.angsep(desired_position)) < tpl.getobject(
+                        'POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
                     self._slewing = False
                     self.slewComplete(self.getAz(), DomeStatus.OK)
                     return 0
                 else:
-                    caz = self.getAz()
+                    current_az = self.getAz()
 
             self.slewComplete(self.getAz(), DomeStatus.OK)
 
@@ -184,20 +198,26 @@ class AstelcoDome(DomeBase):
             start_time = time.time()
 
             tpl = self.getTPL()
-            target_az = tpl.getobject('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS')
+            ref_altitude = Coord.fromD(0.)
+            target_az = Coord.fromD(tpl.getobject('POSITION.INSTRUMENTAL.DOME[0].TARGETPOS'))
+            target_position = Position.fromAltAz(ref_altitude,
+                                                 target_az)
             while True:
-                caz = self.getAz()
-                self.log.debug('Current az: %f | Target az: %f' % (caz, target_az))
+                current_az = self.getAz()
+                current_position = Position.fromAltAz(ref_altitude,
+                                                      current_az)
+                self.log.debug('Current az: %s | Target az: %s' % (current_az.toDMS(), target_az.toDMS()))
                 if time.time() > (start_time + self._maxSlewTime):
-                    if abs(caz - target_az) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 4.0:
+                    if abs(target_position.angsep(current_position).D) < tpl.getobject(
+                            'POINTING.SETUP.DOME.MAX_DEVIATION') * 4.0:
                         self.log.warning("[sync] Dome too far from target position!")
                         break
                     else:
                         self.syncComplete()
                         raise AstelcoDomeException("Dome synchronization timed-out")
-                elif abs(caz - target_az) < tpl.getobject('POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
+                elif abs(target_position.angsep(current_position).D) < tpl.getobject(
+                        'POINTING.SETUP.DOME.MAX_DEVIATION') * 2.0:
                     break
-
 
         self.syncComplete()
         self.log.debug('[sync] Dome in sync')
@@ -218,25 +238,12 @@ class AstelcoDome(DomeBase):
         self._syncmode = tpl.getobject('POINTING.SETUP.DOME.SYNCMODE')
         self._mode = Mode.Track
 
-    @lock
-    def control(self):
-        '''
-        Just keep the connection alive. Everything else is done by astelco.
-
-        :return: True
-        '''
-
-        tpl = self.getTPL()
-        self.log.debug('[control] %s' % tpl.getobject('SERVER.UPTIME'))
-
-        return True
-
 
     def isSlewing(self):
 
         tpl = self.getTPL()
         motionState = tpl.getobject('TELESCOPE.MOTION_STATE')
-        return ( motionState != 11 )
+        return (motionState != 11)
 
     def abortSlew(self):
         self._abort.set()
@@ -309,7 +316,6 @@ class AstelcoDome(DomeBase):
 
             cmd = tpl.getCmd(cmdid)
 
-
         return DomeStatus.OK
 
         # realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
@@ -347,7 +353,7 @@ class AstelcoDome(DomeBase):
         else:
             return DomeStatus.ABORTED
 
-        # return DomeStatus.OK
+            # return DomeStatus.OK
 
     @lock
     def closeSlit(self):
@@ -363,7 +369,7 @@ class AstelcoDome(DomeBase):
 
         realpos = tpl.getobject('AUXILIARY.DOME.REALPOS')
 
-        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 0,wait=False)
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 0, wait=False)
 
         time_start = time.time()
 
@@ -405,7 +411,7 @@ class AstelcoDome(DomeBase):
             return 0
 
         tpl = self.getTPL()
-        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 2,wait=False)
+        cmdid = tpl.set('AUXILIARY.DOME.TARGETPOS', 2, wait=False)
 
         time_start = time.time()
 
@@ -464,8 +470,8 @@ class AstelcoDome(DomeBase):
         # If not, just go on with the instrument's default metadata.
 
         baseHDR = super(DomeBase, self).getMetadata(request)
-        newHDR = [("DOME_AZ",self.getAz().toDMS().__str__(),"Dome Azimuth"),
-                  ("D_OFFSET",self.getAzOffset().toDMS().__str__(),"Dome Azimuth offset")]
+        newHDR = [("DOME_AZ", self.getAz().toDMS().__str__(), "Dome Azimuth"),
+                  ("D_OFFSET", self.getAzOffset().toDMS().__str__(), "Dome Azimuth offset")]
 
         for new in newHDR:
             baseHDR.append(new)
