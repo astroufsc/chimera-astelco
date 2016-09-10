@@ -225,7 +225,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         #self.log.debug('[control] %s'%self._tpl.getobject('SERVER.UPTIME'))
 
         if (not self.isSlewing()) and (self.isTracking()) and (not self.checkLimits()):
-            self.stopTracking()
+            self.stopTracking(self.getPositionAltAz(),TelescopeStatus.OBJECT_TOO_LOW)
             self.log.warning('Telescope bellow horizontal limit.')
 
 
@@ -578,16 +578,21 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
             elif status == AstelcoTelescopeStatus.ERROR or status == AstelcoTelescopeStatus.PANIC:
                 # When something really bad happens during unpark, telescope needs to be parked
                 # and then, start over.
-                tpl.set('ABORT', cmdid)
-                self.log.critical("Something wrong with the telescope. Aborting...")
-                self.logStatus()
-                # self.acknowledgeEvents() # This is needed so I can tell the telescope to park afterwards
-                errmsg = '''Something wrong happened while trying to unpark the telescope. In most cases this happens
-                when one of the submodules (like the hexapod) is not properly loaded or working pressure could not be
-                reached. Waiting a couple of minutes, parking and unparking it again should solve the problem or sending
-                someone there to check on the compressor. If that doesn't work, there may be a more serious problem with
-                the system.'''
-                raise AstelcoException(errmsg)
+                # tpl.set('ABORT', cmdid)
+                self.log.critical("Something wrong with the telescope. Waiting for command completion.")
+                cmd = tpl.getCmd(cmdid)
+                if cmd.complete:
+                    self.logStatus()
+                    # self.acknowledgeEvents() # This is needed so I can tell the telescope to park afterwards
+                    errmsg = '''Something wrong happened while trying to unpark the telescope. In most cases this happens
+                    when one of the submodules (like the hexapod) is not properly loaded or working pressure could not be
+                    reached. Waiting a couple of minutes, parking and unparking it again should solve the problem or sending
+                    someone there to check on the compressor. If that doesn't work, there may be a more serious problem with
+                    the system.'''
+                    raise AstelcoException(errmsg)
+                else:
+                    self.log.critical('Waiting cmd %i to complete. Sleeping for 6s.' % cmdid)
+                    time.sleep(6)
 
             time.sleep(.1)
 
