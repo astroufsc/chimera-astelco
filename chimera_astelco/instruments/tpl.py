@@ -156,12 +156,17 @@ class TPL(ChimeraObject):
         try:
             exp_recv = self.expect()
         except Exception, e:
-            self.log.error("Could not retrieve information from telescope server. Server may be down! Reconnecting and"
+            self.log.error("Could not retrieve information from telescope server. Server may be down! Reconnecting and "
                            "re-sending incomplete commands.")
             self.log.exception(e)
             self._debuglog.exception(e)
 
-            self.disconnect()
+            # try:
+            #     self.disconnect()
+            # except:
+            #     self.log.exception(e)
+            #     self._debuglog.exception(e)
+
             self.connect()
             # incomplete = np.array([not cmd.complete for cmd in self.commands_sent.values()])
             for cmd in self.commands_sent.values():
@@ -266,6 +271,8 @@ class TPL(ChimeraObject):
         '''
             Connect to tpl server
         '''
+
+        self.log.info( "Connecting to %s:%s"%( self['tpl_host'], self['tpl_port']))
 
         # Open the socket
         self.sock = telnetlib.Telnet(self['tpl_host'], self['tpl_port'], self['timeout'])
