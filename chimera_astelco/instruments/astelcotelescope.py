@@ -56,7 +56,7 @@ AstelcoTelescopeStatus = Enum("NoLICENSE",
                               "WARNING",
                               "INFO")
 
-class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # converted to Astelco
+class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier, TelescopePierSide):  # converted to Astelco
 
     __config__ = {'azimuth180Correct': False,
                   'maxidletime': 1.,
