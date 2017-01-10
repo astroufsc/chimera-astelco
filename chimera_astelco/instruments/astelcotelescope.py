@@ -225,7 +225,10 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier, TelescopePi
         #self.log.debug('[control] %s'%self._tpl.getobject('SERVER.UPTIME'))
 
         if (not self.isSlewing()) and (self.isTracking()) and (not self.checkLimits()):
-            self.stopTracking(self.getPositionAltAz(),TelescopeStatus.OBJECT_TOO_LOW)
+            self.stopTracking() #self.getPositionAltAz(),TelescopeStatus.OBJECT_TOO_LOW)
+            self.trackingStopped(self.getPositionAltAz(),
+                                 TelescopeStatus.OBJECT_TOO_LOW)
+
             self.log.warning('Telescope bellow horizontal limit.')
 
 
@@ -690,7 +693,6 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier, TelescopePi
     def stopTracking(self):  # converted to Astelco
         tpl = self.getTPL()
         cmdid = tpl.set('POINTING.TRACK', 0, wait=True)
-        self.trackingStopped()
         return tpl.succeeded(cmdid)
 
 
@@ -1198,7 +1200,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier, TelescopePi
     def stopMoveAll(self):  # converted to Astelco
         tpl = self.getTPL()
         tpl.set('TELESCOPE.STOP', 1, wait=True)
-        self.trackingStopped()
+        # self.trackingStopped()
         return True
 
     @lock
