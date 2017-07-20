@@ -71,7 +71,7 @@ class Command():
         self.ok = False
         self.complete = False
         self.data = []
-
+        self.send_time = time.time()
 
     def __str__(self):
         return str(self.id) + ' ' + self.cmd + ' ' + self.object + '\r\n'
@@ -85,6 +85,7 @@ class TPL(ChimeraObject):
                   "password": 'admin',
                   "freq": 2.,
                   "timeout": 60,
+                  "cmd_timeout": 60,
                   "waittime": 0.5,
                   "history" : 1000}
 
@@ -220,6 +221,14 @@ class TPL(ChimeraObject):
             self._debuglog.debug('[control] Cleaning command history. Deleting cmd with id: %i'%self.last_cmd_deleted)
             self.commands_sent.pop(self.last_cmd_deleted)
 
+        # Check for timed-out commands
+        for cmd in self.commands_sent.values():
+            if time.time() > cmd.send_time + self['cmd_timeout']:
+                self._debuglog.warning('Command %i timed out! Marking as complete with status TIMEOUT.' % cmd.id)
+                cmd.complete = True
+                cmd.ok = False
+                cmd.status = 'TIMEOUT'
+                        
         # self._debuglog.debug('[control] Received %i commands'%nrec)
         # for cmd in self.commands_sent.values():
         #     msg = '%s %s %s'%(cmd.id,cmd.status,cmd.allstatus)
@@ -449,7 +458,7 @@ class TPL(ChimeraObject):
                 break
 
         if st != 'COMPLETE':
-            log.warning( 'TPL2 getobject: got status  %s ...' %st )
+            self.log.warning( 'TPL2 getobject: got status  %s ...' % st)
             return None
         if self.debug:
             log.log(5,self.received_objects)

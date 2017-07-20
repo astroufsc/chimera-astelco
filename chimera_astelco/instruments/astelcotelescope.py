@@ -888,7 +888,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         self.log.info("Time to slew to RA/Dec is reported to be %f s" % ( slewTime ))
 
         target = self.getTargetRaDec()
-
+        self.log.debug("Target Ra/Dec  %s." % target)
         status = self._waitSlew(time.time(), target, slew_time=slewTime)
 
         if status == TelescopeStatus.OK:
@@ -959,6 +959,10 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
             # time.sleep(self["slew_idle_time"])
             cmd = tpl.getCmd(cmdid)
+        # Checks that command completed successfuly
+        if cmd.status != 'COMPLETE':
+            self.log.error('Command completed with status %s' % cmd.status)
+            raise AstelcoTelescopeException('Command completed with status %s' % cmd.status)
 
         self.log.debug('Wait slew to complete...')
 
