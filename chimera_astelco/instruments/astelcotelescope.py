@@ -645,6 +645,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         self.log.debug('Opening telescope cover...')
 
         ready_state = 0.0
+        start_time = time.time()
         while ready_state < 1.0:
             self.log.debug("Opening telescope cover: %s" % (ready_state))
             #old_ready_state = ready_state
@@ -653,6 +654,10 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
             #    self.log.debug("Powering up Astelco: %s"%(ready_state))
             #    old_ready_state = ready_state
             time.sleep(5.0)
+            if time.time() > start_time+self['parktimeout']:
+                # self.log.error('Opening telescope cover timed-out!')
+                tpl.set('ABORT', cmdid)
+                raise AstelcoTelescopeException("Opening telescope cover timed-out!")
 
         return tpl.succeeded(cmdid)
 
@@ -666,6 +671,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         cmdid = tpl.set('AUXILIARY.COVER.TARGETPOS', 0, wait=True)
 
         ready_state = 1.0
+        start_time = time.time()
         while ready_state > 0.0:
             self.log.debug("Closing telescope cover: %s" % (ready_state))
             #old_ready_state = ready_state
@@ -674,6 +680,10 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
             #    self.log.debug("Powering up Astelco: %s"%(ready_state))
             #    old_ready_state = ready_state
             time.sleep(5.0)
+            if time.time() > start_time+self['parktimeout']:
+                # self.log.error('Opening telescope cover timed-out!')
+                tpl.set('ABORT', cmdid)
+                raise AstelcoTelescopeException("Closing telescope cover timed-out!")
 
         return True  #self._tpl.succeeded(cmdid)
 
