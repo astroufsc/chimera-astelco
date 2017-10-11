@@ -313,18 +313,19 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
         try:
             status = self._slewToRaDec()
+            self._slewing = False
+            self.slewComplete(self.getPositionRaDec(), status)
             #return True
         except Exception, e:
+            # Capture any exception and setup the appropriate flag before raising the exception again
             self._slewing = False
             if self._abort.isSet():
                 status = TelescopeStatus.ABORTED
             else:
                 status = TelescopeStatus.ERROR
-            self.log.exception(e)
-        finally:
-            self._slewing = False
             self.slewComplete(self.getPositionRaDec(), status)
-            return status
+            raise
+        return status
 
 
     @lock
