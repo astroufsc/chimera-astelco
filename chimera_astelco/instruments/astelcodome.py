@@ -315,6 +315,13 @@ class AstelcoDome(DomeBase):
                 return DomeStatus.TIMEOUT
 
             cmd = tpl.getCmd(cmdid)
+        self.log.debug('Command complete... Waiting while slit opens...')
+        time_start = time.time()
+
+        while not self.isSlitOpen():
+            if time.time() > time_start + self._maxSlewTime:
+                return DomeStatus.TIMEOUT
+
 
         return DomeStatus.OK
 
