@@ -75,6 +75,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         self._slewRate = None
         self._abort = threading.Event()
         self._slewing = False
+        self._tracking = False
 
         self._errorNo = 0
         self._errorString = ""
@@ -231,6 +232,14 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
             self.log.warning('Telescope bellow horizontal limit.')
 
+        # Check consistency between internal tracking flag and actual state of the telscope
+        if self._tracking and (not self.isTracking()):
+            self.trackingStopped(self.getPositionAltAz(),
+                                 TelescopeStatus.ERROR)
+            self.log.warning('Internal tracking flag and telescope state does not match.')
+            self._tracking = self.isTracking()
+        else:
+            self._tracking = self.isTracking()
 
         # Update sensor and coordinate information
         self.updateSensors()
@@ -702,9 +711,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
     @lock
     def stopTracking(self):  # converted to Astelco
-        tpl = self.getTPL()
-        cmdid = tpl.set('POINTING.TRACK', 0, wait=True)
-        return tpl.succeeded(cmdid)
+        self._stopTracking()
 
 
     def isTracking(self):  # converted to Astelco
@@ -890,6 +897,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
             return False
 
     def _slewToRaDec(self):  # converted to Astelco
+        self._stopTracking()
         self._slewing = True
         self._abort.clear()
 
@@ -908,6 +916,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
             return TelescopeStatus.ERROR
 
     def _slewToAltAz(self):  # converted to Astelco
+        self._stopTracking()
         self._slewing = True
         self._abort.clear()
 
@@ -1066,9 +1075,18 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         # self.log.debug('Wait for telescope to stabilize...')
         # time.sleep(self["stabilization_time"])
 
+        # Set control flag
+        self._tracking = True
+
         # no need to check it here...
         self.trackingStarted(target)
         return TelescopeStatus.OK
+
+    def _stopTracking(self):
+        tpl = self.getTPL()
+        cmdid = tpl.set('POINTING.TRACK', 0, wait=True)
+        self._tracking = False
+        return tpl.succeeded(cmdid)
 
     def _getOffset(self, direction):
 
