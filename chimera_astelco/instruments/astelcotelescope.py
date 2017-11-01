@@ -42,7 +42,8 @@ from chimera.util.position import Position, Epoch
 from chimera.util.enum import Enum
 
 from chimera.core.lock import lock
-from chimera.core.exceptions import ObjectNotFoundException, ObjectTooLowException
+from chimera.core.exceptions import (ObjectNotFoundException, ObjectTooLowException, ChimeraException,
+                                     CantPointScopeException)
 from chimera.core.constants import SYSTEM_CONFIG_DIRECTORY
 
 from astelcoexceptions import AstelcoException, AstelcoTelescopeException
@@ -960,12 +961,23 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
                 self.stopMoveAll()
                 return TelescopeStatus.ABORTED
 
+            status = self.getTelescopeStatus()
+
+            if status == AstelcoTelescopeStatus.PANIC or status == AstelcoTelescopeStatus.ERROR:
+                self.logStatus()
+                self.log.error('Telescope in %s mode!' % status)
+                self._slewing = False
+                raise CantPointScopeException('Telescope in %s mode!' % status)
+            else:
+                self.logStatus()
+                self.log.error('Telescope in %s mode!' % status)
+
             # check timeout
             if time.time() >= (start_time + self["max_slew_time"]):
                 self.stopMoveAll()
                 self._slewing = False
                 self.log.error('Slew aborted. Max slew time reached.')
-                raise AstelcoException("Slew aborted. Max slew time reached.")
+                raise CantPointScopeException("Slew aborted. Max slew time reached.")
 
             if time.time() >= (start_time + slew_time):
                 self.log.warning('Estimated slewtime has passed...')
@@ -982,7 +994,7 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         # Checks that command completed successfuly
         if cmd.status != 'COMPLETE':
             self.log.error('Command completed with status %s' % cmd.status)
-            raise AstelcoTelescopeException('Command completed with status %s' % cmd.status)
+            raise CantPointScopeException('Command completed with status %s' % cmd.status)
 
         self.log.debug('Wait slew to complete...')
 
@@ -995,6 +1007,17 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
                 self._slewing = False
                 self.abortSlew()
                 return TelescopeStatus.ABORTED
+
+            status = self.getTelescopeStatus()
+
+            if status == AstelcoTelescopeStatus.PANIC or status == AstelcoTelescopeStatus.ERROR:
+                self.logStatus()
+                self.log.error('Telescope in %s mode!' % status)
+                self._slewing = False
+                raise CantPointScopeException('Telescope in %s mode!' % status)
+            else:
+                self.logStatus()
+                self.log.error('Telescope in %s mode!' % status)
 
             # check timeout
             if time.time() >= (start_time + self["max_slew_time"]):
@@ -1022,6 +1045,17 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
             self.log.debug('MSTATE: %i (%s) dec= %s ra=%s' % (mstate, bin(mstate),bin(dec_state),bin(ha_state)))
             if (mstate & 1) == 0:
+                status = self.getTelescopeStatus()
+
+                if status == AstelcoTelescopeStatus.PANIC or status == AstelcoTelescopeStatus.ERROR:
+                    self.logStatus()
+                    self.log.error('Telescope in %s mode!' % status)
+                    self._slewing = False
+                    raise CantPointScopeException('Telescope in %s mode!' % status)
+                else:
+                    self.logStatus()
+                    self.log.error('Telescope in %s mode!' % status)
+
                 self.log.debug('Slew finished...')
                 return TelescopeStatus.OK
 
@@ -1074,6 +1108,16 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
 
         # self.log.debug('Wait for telescope to stabilize...')
         # time.sleep(self["stabilization_time"])
+        status = self.getTelescopeStatus()
+
+        if status == AstelcoTelescopeStatus.PANIC or status == AstelcoTelescopeStatus.ERROR:
+            self.logStatus()
+            self.log.error('Telescope in %s mode!' % status)
+            self._slewing = False
+            raise CantPointScopeException('Telescope in %s mode!' % status)
+        else:
+            self.logStatus()
+            self.log.error('Telescope in %s mode!' % status)
 
         # Set control flag
         self._tracking = True
