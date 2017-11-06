@@ -492,6 +492,9 @@ class AstelcoTelescope(TelescopeBase, TelescopeCover, TelescopePier):  # convert
         if self.isParked():
             return True
 
+        if self.isTracking():
+            self.stopTracking()
+
         # 1. slew to park position FIXME: allow different park
         # positions and conversions from ra/dec -> az/alt
 
